@@ -24,13 +24,15 @@ bl_info = {
     "name": "Import: Minecraft b1.7+",
     "description": "Importer for viewing Minecraft worlds",
     "author": "Adam Crossan (acro)",
-    "version": (1,6,1),
+    "version": (1,6,2),
     "blender": (2, 6, 0),
     "api": 41226,
     "location": "File > Import > Minecraft",
     "warning": '', # used for warning icon and text in addons panel
     "wiki_url": "http://randomsamples.info/project/mineblend",
     "category": "Import-Export"}
+
+DEBUG_SCENE=False
 
 # To support reload properly, try to access a package var, if it's there, reload everything
 if "bpy" in locals():
@@ -53,6 +55,36 @@ from . import mineregion
 #    return
 #setSceneProps(bpy.context.scene)
 
+def createTestScene():
+    bpy.ops.scene.new(type='NEW')
+    bpy.context.scene.render.engine = 'CYCLES'
+    # plane
+    bpy.ops.mesh.primitive_plane_add(radius=1, view_align=True, enter_editmode=False, location=(0,0,0), rotation=(0,0,0), layers = (True, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False))
+    bpy.ops.transform.resize(value=(10,10,10), constraint_axis=(False, False, False), constraint_orientation='GLOBAL', mirror=False, proportional='DISABLED', proportional_edit_falloff='SMOOTH', proportional_size=1)
+    bpy.ops.material.new()
+    # cube
+    bpy.ops.mesh.primitive_cube_add(radius=1, view_align=True, enter_editmode=False, location=(0,0,0), rotation=(0,0,0), layers = (True, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False))
+    # FIXME - error
+    #bpy.context.space_data.context='MATERIAL'
+    bpy.ops.transform.translate(value=(0.55,0.17,1.14), constraint_axis=(False,False, False), constraint_orientation='GLOBAL', mirror=False, proportional='DISABLED', proportional_edit_falloff='SMOOTH', proportional_size=1)
+    # set material to leaves?
+    bpy.ops.object.editmode_toggle()
+    bpy.ops.uv.unwrap(method='CONFORMAL', margin=0.001)
+    # uv mapping - how do we tell blender?
+    #bpy.ops.transform.resize(value=(0.0368432,0.0368432,0.0368432), constraint_axis=(False,False,False), constraint_orientation='GLOBAL', mirror=False, proportional='DISABLED', proportional_edit_falloff='SMOOTH', proportional_size=1)
+    #bpy.ops.transform.translate(value=(-0.202301, 0.07906, 0), constraint_axis=(False,False,False), constraint_orientation='GLOBAL', mirror=False, proportional_falloff='SMOOTH', proportional_size=1)
+    bpy.ops.object.editmode_toggle()
+    # lights...
+    bpy.ops.object.lamp_add(type='SUN', view_align=True, location=(-8.12878,5.39259,9.70453), rotation=(-0.383973,0,0), layers=(True, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False))
+    # camera...
+    bpy.ops.object.camera_add(view_align=True, enter_editmode=False, location=(-8.12878,-9.13302,7.87796), rotation=(0,0,0), layers=(True, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False))
+    #bpy.context.space_data.context='CONSTRAINT'
+    bpy.ops.object.constraint_add(type='TRACK_TO')
+    bpy.context.object.constraints["Track To"].target = bpy.data.objects["Cube.001"]
+    bpy.context.object.constraints["Track To"].track_axis = 'TRACK_NEGATIVE_Z'
+    bpy.context.object.constraints["Track To"].up_axis = 'UP_Y'
+
+
 #Menu 'button' for the import menu (which calls the world selector)...
 class MinecraftWorldSelector(bpy.types.Operator):
     """An operator defining a dialogue for choosing one on-disk Minecraft world to load.
@@ -69,24 +101,23 @@ a preset specific folder structure of multiple files which cannot be selected si
     mcLoadAtCursor = bpy.props.BoolProperty(name='Use 3D Cursor as Player', description='Loads as if 3D cursor offset in viewport was the player (load) position.', default=False)
 
     #TODO: Make this much more intuitive for the user!
-    mcLowLimit = bpy.props.IntProperty(name='Load Floor', description='The lowest depth layer to load. (High=256, Sea=64, Low=0)', min=0, max=256, step=1, default=0, subtype='UNSIGNED')
-    mcHighLimit = bpy.props.IntProperty(name='Load Ceiling', description='The highest layer to load. (High=256, Sea=64, Low=0)', min=0, max=256, step=1, default=256, subtype='UNSIGNED')
+    mcLowLimit = bpy.props.IntProperty(name='Load Floor', description='The lowest depth layer to load. (High=256, Sea=64, Low=0)', min=0, max=256, step=1, default=50, subtype='UNSIGNED')
+    mcHighLimit = bpy.props.IntProperty(name='Load Ceiling', description='The highest layer to load. (High=256, Sea=64, Low=0)', min=0, max=256, step=1, default=128, subtype='UNSIGNED')
 
     mcLoadRadius = bpy.props.IntProperty(name='Load Radius', description="""The half-width of the load range around load-pos.
 e.g, 4 will load 9x9 chunks around the load centre
 WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, step=1, default=5, subtype='UNSIGNED')    #soft_min, soft_max?
     #optimiser algorithms/detail omissions
 
-    mcOmitStone = bpy.props.BoolProperty(name='Omit Stone', description='Check this to not load stone blocks (block id 1). Speeds up loading and viewport massively', default=True)
-    
-    mcLoadNether = bpy.props.BoolProperty(name='Load Nether', description='Load Nether (if present) instead of Overworld.', default=False)
+    mcOmitStone = bpy.props.BoolProperty(name='Omit common blocks', description='When checked, do not import common blocks such as stone & dirt blocks (overworld) or netherrack (nether).  Significantly improves performance... good for preview imports.', default=False)
 
-    mcLoadEnd = bpy.props.BoolProperty(name='Load The End', description='Load The End (if present) instead of Overworld.', default=False)
+    mcDimenSelectList = bpy.props.EnumProperty(items=[('0', 'Overworld', 'Overworld'), ('1', 'Nether', 'Nether'), ('2', 'The End', 'The End')][::1], name="Dimension", description="Which dimension should be loaded?")	#default='0'
 
     mcShowSlimeSpawns = bpy.props.BoolProperty(name='Slime Spawns', description='Display green markers showing slime-spawn locations', default=False)
 
-    mcUseCyclesMats = bpy.props.BoolProperty(name='Use Cycles', description='Set up default materials for use with Cycles Render Engine instead of Blender Internal', default=False)
+    mcUseCyclesMats = bpy.props.BoolProperty(name='Use Cycles', description='Set up default materials for use with Cycles Render Engine instead of Blender Internal', default=True)
 
+    mcOmitMobs = bpy.props.BoolProperty(name='Omit Mobs', description='When checked, do not load mobs (creepers, skeletons, zombies, etc.) in world', default=True)
     #may need to define loadnether and loadend as operators...?
 
     # omit Dirt toggle option.
@@ -129,7 +160,6 @@ WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, st
 
     #my_worldlist = bpy.props.EnumProperty(items=[('0', "A", "The A'th item"), ('1', 'B', "Bth item"), ('2', 'C', "Cth item"), ('3', 'D', "dth item"), ('4', 'E', 'Eth item')][::-1], default='2', name="World", description="Which Minecraft save should be loaded?")
 
-
     def execute(self, context): 
         #self.report({"INFO"}, "Loading world: " + str(self.mcWorldSelectList))
         #thread.sleep(30)
@@ -138,9 +168,14 @@ WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, st
         #from . import mineregion
         scn = context.scene
 
+        mcLoadDimenNether = True if (self.mcDimenSelectList=='1') else False
+        mcLoadDimenEnd = True if (self.mcDimenSelectList=='2') else False
+        # FIXME - when omitmobs is unchecked, mobs will sometimes still not be imported (related to reload issue?)
         opts = {"omitstone": self.mcOmitStone, "showslimes": self.mcShowSlimeSpawns, "atcursor": self.mcLoadAtCursor,
-            "highlimit": self.mcHighLimit, "lowlimit": self.mcLowLimit, "loadnether": self.mcLoadNether,    #scn['MCLoadNether']
-            "loadend": self.mcLoadEnd, "usecycles": self.mcUseCyclesMats}
+            "highlimit": self.mcHighLimit, "lowlimit": self.mcLowLimit,
+            "loadnether": mcLoadDimenNether, "loadend": mcLoadDimenEnd,
+            "usecycles": self.mcUseCyclesMats, "omitmobs": self.mcOmitMobs}
+        #print(str(opts))
         #get selected world name instead via bpy.ops.mcraft.worldselected -- the enumeration as a property/operator...?
         mineregion.readMinecraftWorld(str(self.mcWorldSelectList), self.mcLoadRadius, opts)
         for s in bpy.context.area.spaces: # iterate all space in the active area
@@ -148,6 +183,8 @@ WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, st
                 space = s
                 space.clip_end = 10000.0
         #run minecraftLoadChunks
+        if DEBUG_SCENE:
+            createTestScene()
         
         return {'FINISHED'}
 
@@ -164,20 +201,12 @@ WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, st
 
         row = col.row()
         row.prop(self, "mcLoadAtCursor")
-        row.prop(self, "mcOmitStone")
         
         row = col.row()
         
         sub = col.split(percentage=0.5)
         colL = sub.column(align=True)
         colL.prop(self, "mcShowSlimeSpawns")
-        colR = sub.column(align=True)
-        ##colR.active = self.mcWorldSelectList in self.netherWorlds #self.mcworld_has_nether(self.mcWorldSelectList)    #in self.netherWorlds / in self.endWorlds
-        colR.prop(self, "mcLoadNether")
-
-        rowEnd = colR.row()
-        ##rowEnd.active = self.mcWorldSelectList in self.endWorlds
-        rowEnd.prop(self, "mcLoadEnd")
 
         cycles = None
         if hasattr(bpy.context.scene, 'cycles'):
@@ -186,6 +215,10 @@ WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, st
         if cycles is not None:
             row2.active = (cycles is not None)
             row2.prop(self, "mcUseCyclesMats")
+
+        row3 = col.row()
+        row3.prop(self, "mcOmitStone")
+        row3.prop(self, "mcOmitMobs")
         #if cycles:
         #like this from properties_data_mesh.py:
         ##layout = self.layout
@@ -206,6 +239,10 @@ WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, st
         row.prop(self, "mcHighLimit")
         row = layout.row()
         row.prop(self, "mcLoadRadius")
+
+        row = layout.row()
+        row.prop(self, "mcDimenSelectList")
+        #col = layout.column()
 
         row = layout.row()
         row.prop(self, "mcWorldSelectList")

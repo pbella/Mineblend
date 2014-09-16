@@ -1,5 +1,24 @@
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+#
+# Contributors:
+# Originally authored by Acro
+# Modified by Phil B
+#
+#
+#
 # Acro's Python3.2 NBT Reader for Blender Importing Minecraft
-# See __init__.py for GPL Licence details.
 
 #TODO Possible Key Options for the importer:
 
@@ -18,6 +37,7 @@ import bpy
 from bpy.props import FloatVectorProperty
 from mathutils import Vector
 from . import blockbuild
+from . import sysutil
 #using blockbuild.createMCBlock(mcname, diffuseColour, mcfaceindices)
 #faceindices order: (bottom, top, right, front, left, back)
 #NB: this should probably change, as it was started by some uv errors.
@@ -40,20 +60,9 @@ wseed = None	#store chosen world's worldseed, handy for slimechunk calcs.
 
 MCREGION_VERSION_ID = 0x4abc;	# Check world's level.dat 'version' property for these.
 ANVIL_VERSION_ID = 0x4abd;		# 
-
-MCPATH = ''
-MCSAVEPATH = ''
-if sys.platform == 'darwin':
-    MCPATH = os.path.join(os.environ['HOME'], 'Library', 'Application Support', 'minecraft')
-elif sys.platform == 'linux':
-    MCPATH = os.path.join(os.environ['HOME'], '.minecraft')
-else:
-    MCPATH = os.path.join(os.environ['APPDATA'], '.minecraft')
-
-MCSAVEPATH = os.path.join(MCPATH, 'saves/')
     
 #TODO: Retrieve these from bpy.props properties stuck in the scene RNA.
-EXCLUDED_BLOCKS = [1, 3]    #(1,3) # hack to reduce loading / slowdown: (1- Stone, 3- Dirt). Other usual suspects are Grass,Water, Leaves, Sand,StaticLava
+EXCLUDED_BLOCKS = [1, 3, 87]    #(1,3,87) # hack to reduce loading / slowdown: (1- Stone, 3- Dirt, 87 netherrack). Other usual suspects are Grass,Water, Leaves, Sand,StaticLava
 
 LOAD_AROUND_3D_CURSOR = False  #calculates 3D cursor as a Minecraft world position, and loads around that instead of player (or SMP world spawn) position
 
@@ -79,7 +88,7 @@ WORLD_ROOT = None
 
 #MCBINPATH -- in /bin, zipfile open minecraft.jar, and get terrain.png.
 #Feed directly into Blender, or save into the Blender temp dir, then import.
-print(MCPATH)
+print("Minecraft saved games location: "+sysutil.getMCPath())
 
 #Blockdata: [name, diffuse RGB triple, texture ID list, extra data? (XD/none),
 # custom model shape (or None), shape params (or None if not custom mesh),
@@ -90,130 +99,148 @@ print(MCPATH)
 #Don't store a name for air. Ignore air.
 # Order for Blender cube face creation is: [bottom, top, right, front, left, back]
 
-BLOCKDATA = {0: ['Air'],
-            1: ['Stone', (116,116,116), [1,1,1,1,1,1]],
-            2: ['Grass', (95,159,53), [2,0,3,3,3,3]],    #[bot, top, right, front, left, back] - top is 0; grass is biome tinted, though.
-            3: ['Dirt', (150, 108, 74), [2,2,2,2,2,2]],
-            4: ['Cobblestone', (94,94,94), [16,16,16,16,16,16]],
-            5: ['WoodenPlank', (159,132,77), [4,4,4,4,4,4]],
-            6: ['Sapling', (0,100,0), [15]*6, 'XD', 'cross'],
-            7: ['Bedrock', [51,51,51], [17]*6],
-            8: ['WaterFlo', (31,85,255), [207]*6],
-            9: ['Water', (62,190,255), [207]*6],
-            10: ['LavaFlo', (252,0,0), [255]*6, None, None, None, {'emit': 1.10, 'transp': False}],
-            11: ['Lava',    (230,0,0), [255]*6, None, None, None, {'emit': 1.10, 'transp': False}],
-            12: ['Sand', (214,208,152), [18]*6],
-            13: ['Gravel', (154,135,135), [19]*6],
-            14: ['GoldOre', (252,238,75), [32]*6],
-            15: ['IronOre', (216,175,147), [33]*6],
-            16: ['CoalOre', (69,69,69), [34]*6],
-            17: ['Wood', (76,61,38), [21,21,20,20,20,20], 'XD'],
-            18: ['Leaves', (99,128,15), [53]*6],    #TODO: XD colour+texture.
-            19: ['Sponge', (206,206,70), [48]*6],
-            20: ['Glass', (254,254,254), [49]*6, None, None, None, {'transp': True}],
-            21: ['LapisLazuliOre', (28,87,198), [160]*6],
-            22: ['LapisLazuliBlock', (25,90,205), [144]*6],
-            23: ['Dispenser', (42,42,42), [62,62,45,46,45,45]],
-            24: ['Sandstone', (215,209,153), [208,176,192,192,192,192], 'XD'],
-            25: ['NoteBlock', (145,88,64), [74]*6], #python sound feature? @see dr epilepsy.
+BLOCKDATA =  {0: ['Air'],
+            1: ['Stone', (116,116,116), [308]*6],
+            2: ['Grass', (95,159,53), [200,148,332,332,332,332]],
+            3: ['Dirt', (150, 108, 74), [200]*6],
+            4: ['Cobblestone', (94,94,94), [163]*6],
+            5: ['WoodenPlank', (159,132,77), [176]*6],
+            6: ['Sapling', (0,100,0), [20]*6, 'XD', 'cross'],
+            7: ['Bedrock', [51,51,51], [100]*6],
+            8: ['WaterFlo', (31,85,255), [2]*6, None, None, None, {'alpha': True}],
+            9: ['Water', (62,190,255), [2]*6, None, None, None, {'alpha': True}],
+            10: ['LavaFlo', (252,0,0), [0]*6, None, None, None, {'emit': 1.10, 'stencil': False}],
+            11: ['Lava',    (230,0,0), [0]*6, None, None, None, {'emit': 1.10, 'stencil': False}],
+            12: ['Sand', (214,208,152), [243]*6],
+            13: ['Gravel', (154,135,135), [352]*6],
+            14: ['GoldOre', (252,238,75), [331]*6],
+            15: ['IronOre', (216,175,147), [395]*6],
+            16: ['CoalOre', (69,69,69), [161]*6],
+            17: ['Wood', (76,61,38), [452,452,451,451,451,451], 'XD'],
+            18: ['Leaves', (99,128,15), [425]*6, None, None, None, {'stencil': False, 'leaf': True}],    #TODO: XD colour+texture.
+            19: ['Sponge', (206,206,70), [244]*6], # FIXME - wet sponge
+            20: ['Glass', (254,254,254), [263]*6, None, None, None, {'stencil': True}],
+            21: ['LapisLazuliOre', (28,87,198), [418]*6],
+            22: ['LapisLazuliBlock', (25,90,205), [417]*6],
+            23: ['Dispenser', (42,42,42), [262,262,261,41,261,261]], # TODO - front?
+            24: ['Sandstone', (215,209,153), [307,307,339,339,339,339], 'XD'], #!!
+            25: ['NoteBlock', (145,88,64), [398]*6], #python sound feature? @see dr epilepsy.
             26: ['Bed'],    #inset, directional. xd: if head/foot + dirs.
-            27: ['PwrRail', (204,93,22), [163]*6, 'XD', 'onehigh', None, {'transp': True}],	#meshtype-> "rail". define as 1/16thHeightBlock, read extra data to find orientation.
-            28: ['DetRail', (134,101,100), [195]*6, 'XD', 'onehigh', None, {'transp': True}],	#change meshtype to "rail" for purposes of slanted bits. later. PLANAR, too. no bottom face.
-            29: ['StickyPiston', (114,120,70), [109,106,108,108,108,108], 'XD', 'pstn'],
-            30: ['Cobweb', (237,237,237), [11]*6, 'none', 'cross', None, {'transp': True}],
-            31: ['TallGrass', (52,79,45), [180,180,39,39,39,39], 'XD', 'cross', None, {'transp': True}],
-            32: ['DeadBush', (148,100,40), [55]*6, None, 'cross', None, {'transp': True}],
-            33: ['Piston', (114,120,70), [109,107,108,108,108,108], 'XD', 'pstn'],
-            34: ['PistonHead', (188,152,98), [180,107,180,180,180,180]],	#or top is 106 if sticky (extra data)
-            35: ['Wool', (235,235,235), [64]*6, 'XD'],  #XD means use xtra data...
-            37: ['Dandelion', (204,211,2), [13]*6, 'no', 'cross', None, {'transp': True}],
-            38: ['Rose', (247,7,15), [12]*6, 'no', 'cross', None, {'transp': True}],
-            39: ['BrownMushrm', (204,153,120), [29]*6, 'no', 'cross', None, {'transp': True}],
-            40: ['RedMushrm', (226,18,18), [28]*6, 'no', 'cross', None, {'transp': True}],
-            41: ['GoldBlock', (255,241,68), [23]*6],
-            42: ['IronBlock', (230,230,230), [22]*6],
-            43: ['DblSlabs', (255,255,0), [6,6,5,5,5,5], 'XD', 'twoslab'],	#xd for type
-            44: ['Slabs', (255,255,0), [6,6,5,5,5,5], 'XD', 'slab'],	#xd for type
-            45: ['BrickBlock', (124,69,24), [7]*6],
-            46: ['TNT', (219,68,26), [10,9,8,8,8,8]],
-            47: ['Bookshelf', (180,144,90), [4,4,35,35,35,35]],
-            48: ['MossStone', (61,138,61), [36]*6],
-            49: ['Obsidian', (60,48,86), [37]*6],
-            50: ['Torch', (240,150,50), [80,80,80,80,80,80], 'XD', 'inset', [0,6,7]],
-            51: ['Fire', (255,100,100), [10]*6, None, 'hash', None, {'emit': 1.0, 'transp': True}],	#TODO: Needed for Nether. maybe use hash mesh '#'
-            52: ['MonsterSpawner', (27,84,124), [65]*6, None, None, None, {'transp': True}],	#xtra data for what's spinning inside it??
-            53: ['WoodenStairs', (159,132,77), [4,4,4,4,4,4], 'XD', 'stairs'],
-            54: ['Chest', (164,114,39), [25,25,26,27,26,26], 'XD', 'chest'],    #texface ordering is wrong
-            55: ['RedStnWire', (255,0,3), [165]*6, 'XD', 'onehigh', None, {'transp': True}],	#FSM-dependent, may need XD. Also, texture needs to act as bitmask alpha only, onto material colour on this thing.
-            56: ['DiamondOre', (93,236,245), [50]*6],
-            57: ['DiamondBlock', (93,236,245), [24]*6],
-            58: ['CraftingTbl', (160,105,60), [43,43,59,60,59,60]],
-            59: ['Seeds', (160,184,0), [180,180,94,94,94,94], 'XD', 'crops', None, {'transp': True}],
-            60: ['Farmland', (69,41,21), [2,87,2,2,2,2]],
-            61: ['Furnace', (42,42,42), [62,62,45,44,45,45]],		#[bottom, top, right, front, left, back]
-            62: ['Burnace', (50,42,42), [62,62,45,61,45,45]],
-            63: ['SignPost', (159,132,77), [4,4,4,4,4,4], 'XD', 'sign'],
-            64: ['WoodDoor', (145,109,56), [97,97,81,81,81,81], 'XD', 'door', None, {'transp': True}],
-            65: ['Ladder', (142,115,60), [83]*6, None, None, None, {'transp': True}],
-            66: ['Rail', (172,136,82), [180,128,180,180,180,180], 'XD', 'onehigh', None, {'transp': True}],	#to be refined for direction etc.
-            67: ['CobbleStairs', (77,77,77), [16]*6, 'XD', 'stairs'],
-            68: ['WallSign', (159,132,77), [4,4,4,4,4,4], 'XD', 'wallsign'],	#TODO: UVs! + Model!
-            69: ['Lever', (105,84,51), [96]*6, 'XD', 'lever'],
-            70: ['StnPressPlate', (110,110,110), [1]*6, 'no', 'onehigh'],
-            71: ['IronDoor', (183,183,183), [98,98,82,82,82,82], 'XD', 'door', None, {'transp': True}],
-            72: ['WdnPressPlate', (159,132,77), [4]*6, 'none', 'onehigh'],
+            27: ['PwrRail', (204,93,22), [433]*6, 'XD', 'onehigh', None, {'stencil': True}],	#meshtype-> "rail". define as 1/16thHeightBlock, read extra data to find orientation.
+            28: ['DetRail', (134,101,100), [465]*6, 'XD', 'onehigh', None, {'stencil': True}],	#change meshtype to "rail" for purposes of slanted bits. later. PLANAR, too. no bottom face.
+            29: ['StickyPiston', (114,120,70), [109,491,493,493,493,493], 'XD', 'pstn'],
+            30: ['Cobweb', (237,237,237), [54]*6, 'none', 'cross', None, {'stencil': True}],
+            # tried 370, 434
+            31: ['TallGrass', (52,79,45), [213,213,213,213,213,213], 'XD', 'cross', None, {'stencil': True}],
+            32: ['DeadBush', (148,100,40), [225]*6, None, 'cross', None, {'stencil': True}],
+            33: ['Piston', (114,120,70), [491,494,493,493,493,493], 'XD', 'pstn'],
+            34: ['PistonHead', (188,152,98), [494]*6],	#or top is 106 if sticky (extra data)
+            35: ['Wool', (235,235,235), [279]*6, 'XD'],  #XD means use xtra data...
+            37: ['Dandelion', (204,211,2), [79]*6, 'no', 'cross', None, {'stencil': True}],
+            38: ['Rose', (247,7,15), [207]*6, 'no', 'cross', None, {'stencil': True}],
+            39: ['BrownMushrm', (204,153,120), [480]*6, 'no', 'cross', None, {'stencil': True}],
+            40: ['RedMushrm', (226,18,18), [481]*6, 'no', 'cross', None, {'stencil': True}],
+            41: ['GoldBlock', (255,241,68), [330]*6], # Todo: metalic
+            42: ['IronBlock', (230,230,230), [394]*6],
+            43: ['DblSlabs', (255,255,0), [53,53,21,21,21,21], 'XD', 'twoslab'],	#xd for type
+            44: ['Slabs', (255,255,0), [53,53,21,21,21,21], 'XD', 'slab'],	#xd for type
+            45: ['BrickBlock', (124,69,24), [101]*6],
+            46: ['TNT', (219,68,26), [245,309,277,277,277,277]],
+            47: ['Bookshelf', (180,144,90), [144,144,5,5,5,5]],
+            48: ['MossStone', (61,138,61), [164]*6],
+            49: ['Obsidian', (60,48,86), [141]*6],
+            50: ['Torch', (240,150,50), [426]*6, 'XD', 'inset', [0,6,7], {'stencil': True}],
+            51: ['Fire', (255,100,100), [56]*6, None, 'hash', None, {'emit': 1.0, 'stencil': True}],	#TODO: Needed for Nether. maybe use hash mesh '#'
+            52: ['MonsterSpawner', (27,84,124), [65]*6, None, None, None, {'stencil': True}],	#xtra data for what's spinning inside it??
+            53: ['WoodenStairs', (159,132,77), [4,4,4,4,4,4], 'XD', 'stairs'], # TODO
+            54: ['Chest', (164,114,39), [25,25,26,27,26,26], 'XD', 'chest'],    #texface ordering is wrong # TODO
+            55: ['RedStnWire', (255,0,3), [434]*6, 'XD', 'onehigh', None, {'stencil': True}],	#FSM-dependent, may need XD. Also, texture needs to act as bitmask alpha only, onto material colour on this thing. # TODO alpha color
+            56: ['DiamondOre', (93,236,245), [168]*6],
+            57: ['DiamondBlock', (93,236,245), [136]*6],
+            58: ['CraftingTbl', (160,105,60), [197,197,196,195,196,195]],
+            59: ['Seeds', (160,184,0), [310]*6, 'XD', 'crops', None, {'stencil': True}],
+            60: ['Farmland', (69,41,21), [200,110,200,200,200,200]],
+            61: ['Furnace', (42,42,42), [262,262,261,259,261,261]],		#[bottom, top, right, front, left, back]
+            62: ['Burnace', (50,42,42), [262,262,261,259,261,261]],
+            63: ['SignPost', (159,132,77), [579]*6, 'XD', 'sign'],
+            64: ['WoodDoor', (145,109,56), [193,193,283,283,283,283], 'XD', 'door', None, {'stencil': True}], # FIXME top/bot
+            65: ['Ladder', (142,115,60), [416]*6, None, None, None, {'stencil': True}],
+            66: ['Rail', (172,136,82), [82]*6, 'XD', 'onehigh', None, {'stencil': True}],	#to be refined for direction etc.
+            67: ['CobbleStairs', (77,77,77), [163]*6, 'XD', 'stairs'],
+            68: ['WallSign', (159,132,77), [579]*6, 'XD', 'wallsign'],	#TODO: UVs! + Model!
+            69: ['Lever', (105,84,51), [426]*6, 'XD', 'lever'],
+            70: ['StnPressPlate', (110,110,110), [372]*6, 'no', 'onehigh'],
+            71: ['IronDoor', (183,183,183), [187,187,187,187,187,187], 'XD', 'door', None, {'stencil': True}], # TODO top/bot
+            72: ['WdnPressPlate', (159,132,77), [4]*6, 'none', 'onehigh'], #TODO
             73: ['RedstOre', (151,3,3), [51]*6],
             74: ['RedstOreGlowing', (255,3,3), [51]*6],	#wth!
-            75: ['RedstTorchOff', (86,0,0), [115]*6, 'XD', 'inset', [0,6,7]],  #TODO Proper RStorch mesh
-            76: ['RedstTorchOn', (253,0,0), [99]*6, 'XD', 'inset', [0,6,7]],  #todo: 'rstorch'
-            77: ['StoneButton', (116,116,116), [1]*6, 'btn'],
-            78: ['Snow', (240,240,240), [66]*6, 'XD', 'onehigh'],	#snow has height variants 0-7. 7 is full height block. Curses!
-            79: ['Ice', (220,220,255), [67]*6],
-            80: ['SnowBlock', (240,240,240), [66]*6],   #xd determines height.
-            81: ['Cactus', (20,141,36), [71,69,70,70,70,70], 'none', 'cactus'],
-            82: ['ClayBlock', (170,174,190), [72]*6],
-            83: ['SugarCane', (130,168,89), [73]*6, None, 'cross', None, {'transp': True}],
-            84: ['Jukebox', (145,88,64), [75,74,74,74,74,74]],	#XD
-            85: ['Fence', (160,130,70), [4]*6, 'none', 'fence'],	#fence mesh, extra data.
-            86: ['Pumpkin', (227,144,29), [118,102,118,118,118,118]],
-            87: ['Netherrack', (137,15,15), [103]*6],
-            88: ['SoulSand', (133,109,94), [104]*6],
-            89: ['Glowstone', (114,111,73), [105]*6, None, None, None, {'emit': 0.95, 'transp': False}],	#cycles: emitter!
-            90: ['Portal', (150,90,180), None],
-            91: ['JackOLantern',(227,144,29), [118,102,118,119,118,118], 'XD'],	#needs its facing dir.
-            92: ['Cake', (184,93,39), [124,121,122,122,122,122], 'XD', 'inset', [0,8,1]],
-            93: ['RedRepOff', (176,176,176), [131]*6, 'xdcircuit', 'onehigh'],	#TODO 'redrep' meshtype
-            94: ['RedRepOn', (176,176,176), [147]*6, 'xdcircuit', 'onehigh'],	#TODO 'redrep' meshtype
-            95: ['LockedChest', (164,114,39), [25,25,26,27,26,26], 'xd', 'chest'], #texface order wrong (see #54)
-            96: ['Trapdoor', (117,70,34), [84]*6, 'XD', 'inset', [0,13,0]],
-            97: ['HiddenSfish', (116,116,116), [1]*6],
-            98: ['StoneBricks', (100,100,100), [54]*6, 'XD'],
-            99: ['HgBrwM', (210,177,125), [142]*6, 'XD'],	#XD for part/variant/colour (stalk/main)
-            100: ['HgRedM', (210,177,125), [142]*6, 'XD'],
-            101: ['IronBars', (171,171,173), [85]*6, 'XD', 'pane'],
-            102: ['GlassPane', (254,254,254), [49]*6, 'XD', 'pane', None, {'transp': True}],
-            103: ['Melon', (166,166,39), [137,137,136,136,136,136]],
-            104: ['PumpkinStem'],
-            105: ['MelonStem'],
-            106: ['Vines', (39,98,13), [143]*6, 'XD', 'wallface'],
-            107: ['FenceGate', (143,115,73), [4]*6],
-            108: ['BrickStairs', (135,74,58), [7]*6, 'XD', 'stairs'],
-            109: ['StoneBrickStairs', (100,100,100), [54]*6, 'XD', 'stairs'],
-            110: ['Mycelium', (122,103,108), [2,78,77,77,77,77]],	#useful to ignore option? as this is Dirt top in Mushroom Biomes.
-            111: ['LilyPad', (12,94,19), [76]*6, 'none', 'onehigh', None, {'transp': True}],
-            112: ['NethrBrick', (48,24,28), [224]*6],
-            113: ['NethrBrickFence', (48,24,28), [224]*6, 'none', 'fence'],
-            114: ['NethrBrickStairs', (48,24,28), [224]*6, 'XD', 'stairs'],
-            115: ['NethrWart', (154,39,52), [226]*6],
-            116: ['EnchantTab', (116,30,29), [167,166,182,182,182,182], 'none', 'inset', [0,4,0]],  #TODO enchantable with book?
-            117: ['BrewStnd', (207,227,186), [157]*6, 'x', 'brewstand'],    #fully custom model
-            118: ['Cauldron', (55,55,55), [139,138,154,154,154,154]],  #fully custom model
-            119: ['EndPortal', (0,0,0), None],
-            120: ['EndPortalFrame', (144,151,110), [175,158,159,159,159,159]],
-            121: ['EndStone', (144,151,110), [175]*6],
-            122: ['DragonEgg', (0,0,0)],
-            123: ['RedstLampOff', (140,80,44), [211]*6],
-            124: ['RedstLampOn',  (247,201,138), [212]*6]
+            75: ['RedstTorchOff', (86,0,0), [83]*6, 'XD', 'inset', [0,6,7]],  #TODO Proper RStorch mesh
+            76: ['RedstTorchOn', (253,0,0), [115]*6, 'XD', 'inset', [0,6,7]],  #todo: 'rstorch'
+            77: ['StoneButton', (116,116,116), [1]*6, 'btn'], # TODO
+            78: ['Snow', (240,240,240), [180]*6, 'XD', 'onehigh'],	#snow has height variants 0-7. 7 is full height block. Curses!
+            79: ['Ice', (220,220,255), [391]*6],
+            80: ['SnowBlock', (240,240,240), [180]*6],   #xd determines height.
+            81: ['Cactus', (20,141,36), [70,70,38,38,38,38], 'none', 'cactus'],
+            82: ['ClayBlock', (170,174,190), [135]*6],
+            83: ['SugarCane', (130,168,89), [147]*6, None, 'cross', None, {'stencil': True}],
+            84: ['Jukebox', (145,88,64), [489,399,489,489,489,489]],	#XD
+            85: ['Fence', (160,130,70), [4]*6, 'none', 'fence'],	#fence mesh, extra data. #TODO
+            86: ['Pumpkin', (227,144,29), [113,113,17,464,17,17]],
+            87: ['Netherrack', (137,15,15), [488]*6],
+            88: ['SoulSand', (133,109,94), [212]*6],
+            89: ['Glowstone', (114,111,73), [329]*6, None, None, None, {'emit': 0.95, 'stencil': False}],	#cycles: emitter!
+            90: ['Portal', (150,90,180), None], # TODO - shouldn't this be [208]*6?
+            91: ['JackOLantern',(227,144,29), [113,113,17,496,17,17], 'XD'],	#needs its facing dir.
+            92: ['Cake', (184,93,39), [124,71,39,39,39,39], 'XD', 'inset', [0,8,1]], # TODO - bot
+            93: ['RedRepOff', (176,176,176), [179]*6, 'xdcircuit', 'onehigh'],	#TODO 'redrep' meshtype
+            94: ['RedRepOn', (176,176,176), [211]*6, 'xdcircuit', 'onehigh'],	#TODO 'redrep' meshtype
+            #95: ['LockedChest', (164,114,39), [25,25,26,27,26,26], 'xd', 'chest'], #texface order wrong (see #54)
+            # When stencil set, blocks are non-textured and opaque... unanticipated state?
+            95: ['StainedGlass', (164,114,39), [327]*6, 'XD', None, None, {'alpha': True}], #texface order wrong (see #54)
+            96: ['Trapdoor', (117,70,34), [373]*6, 'XD', 'inset', [0,13,0]],
+            97: ['HiddenSfish', (116,116,116), [335]*6],
+            98: ['StoneBricks', (100,100,100), [85]*6, 'XD'],
+            99: ['HgRedM', (210,177,125), [462]*6, 'XD'],	#XD for part/variant/colour (stalk/main)
+            100: ['HgBrwM', (210,177,125), [461]*6, 'XD'],
+            101: ['IronBars', (171,171,173), [393]*6, 'XD', 'pane'],
+            102: ['GlassPane', (254,254,254), [263]*6, 'XD', 'pane', None, {'stencil': True}],
+            103: ['Melon', (166,166,39), [458,458,455,455,455,455]],
+            104: ['PumpkinStem'], # TODO 457?
+            105: ['MelonStem'], # TODO 457?
+            106: ['Vines', (39,98,13), [469]*6, 'XD', 'wallface'],
+            107: ['FenceGate', (143,115,73), [4]*6], #TODO
+            108: ['BrickStairs', (135,74,58), [101]*6, 'XD', 'stairs'], #TODO
+            109: ['StoneBrickStairs', (100,100,100), [85]*6, 'XD', 'stairs'], #TODO
+            110: ['Mycelium', (122,103,108), [200,483,482,482,482,482]],	#useful to ignore option? as this is Dirt top in Mushroom Biomes.
+            111: ['LilyPad', (12,94,19), [22]*6, 'none', 'onehigh', None, {'stencil': True}],
+            112: ['NethrBrick', (48,24,28), [484]*6],
+            113: ['NethrBrickFence', (48,24,28), [484]*6, 'none', 'fence'],
+            114: ['NethrBrickStairs', (48,24,28), [484]*6, 'XD', 'stairs'],
+            115: ['NethrWart', (154,39,52), [487]*6],
+            116: ['EnchantTab', (116,30,29), [141,205,173,173,173,173], 'none', 'inset', [0,4,0]],  #TODO enchantable with book?
+            117: ['BrewStnd', (207,227,186), [157]*6, 'x', 'brewstand'],    #fully custom model # TODO
+            118: ['Cauldron', (55,55,55), [139,138,154,154,154,154]],  #fully custom model # TODO
+            119: ['EndPortal', (0,0,0), None], #TODO
+            120: ['EndPortalFrame', (144,151,110), [237,175,78,46,46,46,46]],
+            121: ['EndStone', (144,151,110), [237]*6],
+            122: ['DragonEgg', (0,0,0)], #TODO
+            123: ['RedstLampOff', (140,80,44), [498]*6],
+            124: ['RedstLampOn',  (247,201,138), [19]*6, None, None, None, {'emit': 0.95, 'stencil': False}],
+            129: ['EmeraldOre', (140,80,44), [109]*6],
+            133: ['EmeraldBlock', (140,80,44), [77]*6],
+            138: ['Beacon',  (247,201,138), [96]*6, None, None, None, {'emit': 1.2, 'stencil': False}], # TODO - encased in glass
+            152: ['Redstone',  (247,201,138), [337]*6],
+            153: ['NetherQuartzOre',  (247,201,138), [369]*6],
+            155: ['Quartz',  (247,201,138), [145]*6], # TODO - variants
+            159: ['StainedClay',  (247,201,138), [384]*6, 'XD'],
+            162: ['Acacia',  (247,201,138), [428,428,427,427,427,427]], # TODO - dark oak
+            168: ['Prismarine', (127, 255, 212), [432]*6, 'XD'],
+            169: ['SeaLantern',  (247,201,138), [116]*6, None, None, None, {'emit': 1.2, 'stencil': False}], # TODO - encased in glass
+            170: ['HayBale', (247,201,138), [387,387,386,386,386,386]],
+            172: ['HardenedClay', (247,201,138), [353]*6],
+            173: ['BlockOfCoal', (247,201,138), [160]*6],
+            174: ['PackedIce', (247,201,138), [392]*6],
+            179: ['RedSandstone', (247,201,138), [306,306,242,242,242,242]*6]
             }
             #And anything new Mojang add in with each update!
 
@@ -226,41 +253,49 @@ BLOCKVARIANTS = {
                     ],
 
                 17: [ [''],#normal wood (oak)
-                      ['Spruce',(76,61,38), [21,21,116,116,116,116]],
-                      ['Birch', (76,61,38), [21,21,117,117,117,117]],
-                      ['Jungle',(89,70,27), [21,21,153,153,153,153]],
+                      ['Spruce',(76,61,38), [454,454,453,453,453,453]],
+                      ['Birch', (76,61,38), [448,448,431,431,431,431]],
+                      ['Jungle',(89,70,27), [450,450,449,449,449,449]],
                     ],
                 #TODO: adjust leaf types, too!
                 
                 24: [ [''],#normal 'cracked' sandstone
-                      ['Decor', (215,209,153), [176,176,229,229,229,229]],
-                      ['Smooth',(215,209,153), [176,176,230,230,230,230]],
+                      ['Decor', (215,209,153), [403,403,301,301,301,301]],
+                      ['Smooth',(215,209,153), [403,403,371,371,371,371]],
                     ],
 
+                # Tallgrass - TODO
+                #31: [ [''],
+                #      ['', (,,), []*6],
+                #      ['', (,,), []*6],
+                #      ],
+                # Wool
                 35: [ [''],
-                      ['Orange', (255,150,54), [210]*6],	#custom tex coords!
-                      ['Magenta', (227,74,240), [194]*6],
-                      ['LightBlue', (83,146,255), [178]*6],
-                      ['Yellow', (225,208,31), [162]*6],
-                      ['LightGreen', (67,218,53), [146]*6],
-                      ['Pink', (248,153,178), [130]*6],
-                      ['Grey', (75,75,75), [114]*6],
-                      ['LightGrey', (181,189,189), [225]*6],
-                      ['Cyan', (45,134,172), [209]*6],
-                      ['Purple', (134,53,204), [193]*6],
-                      ['Blue', (44,58,176), [177]*6],
-                      ['Brown', (99,59,32), [161]*6],
-                      ['DarkGreen', (64,89,27), [145]*6],
-                      ['Red', (188,51,46), [129]*6],
-                      ['Black', (28,23,23), [113]*6]
+                      ['Orange', (255,150,54), [119]*6],	#custom tex coords!
+                      ['Magenta', (227,74,240), [87]*6],
+                      ['LightBlue', (83,146,255), [23]*6],
+                      ['Yellow', (225,208,31), [311]*6],
+                      ['LightGreen', (67,218,53), [55]*6],
+                      ['Pink', (248,153,178), [151]*6],
+                      ['Grey', (75,75,75), [470]*6],
+                      ['LightGrey', (181,189,189), [247]*6],
+                      ['Cyan', (45,134,172), [438]*6],
+                      ['Purple', (134,53,204), [183]*6],
+                      ['Blue', (44,58,176), [374]*6],
+                      ['Brown', (99,59,32), [406]*6],
+                      ['DarkGreen', (64,89,27), [502]*6],
+                      ['Red', (188,51,46), [215]*6],
+                      ['Black', (28,23,23), [342]*6]
                     ],
                 #doubleslabs
+                #38: [ [''],] # TODO - flowers
+
                 43: [ [''], #stone slabs (default)
-                      ['SndStn', (215,209,153), [192]*6],
-                      ['Wdn', (159,132,77), [4]*6],
-                      ['Cobl', (94,94,94), [16]*6],
-                      ['Brick', (124,69,24), [7]*6],
-                      ['StnBrk', (100,100,100), [54]*6],
+                      ['SndStn', (215,209,153), [339]*6],
+                      ['Wdn', (159,132,77), [176]*6],
+                      ['Cobl', (94,94,94), [163]*6],
+                      ['Brick', (124,69,24), [101]*6],
+                      ['StnBrk', (100,100,100), [85]*6],
                       [''],
                     ],
                 
@@ -291,12 +326,30 @@ BLOCKVARIANTS = {
                       ['6', (160,184,0), [94]*6],
                       ['7', (160,184,0), [95]*6],
                     ],
+                # stained glass
+                95: [ ['White', (255,255,255), [327]*6],
+                      ['Orange', (255,150,54), [289]*6],	#custom tex coords!
+                      ['Magenta', (227,74,240), [288]*6],
+                      ['LightBlue', (83,146,255), [267]*6],
+                      ['Yellow', (225,208,31), [328]*6],
+                      ['LightGreen', (67,218,53), [271]*6],
+                      ['Pink', (248,153,178), [323]*6],
+                      ['Grey', (75,75,75), [268]*6],
+                      ['LightGrey', (181,189,189), [326]*6],
+                      ['Cyan', (45,134,172), [270]*6],
+                      ['Purple', (134,53,204), [324]*6],
+                      ['Blue', (44,58,176), [265]*6],
+                      ['Brown', (99,59,32), [266]*6],
+                      ['DarkGreen', (64,89,27), [269]*6],
+                      ['Red', (188,51,46), [325]*6],
+                      ['Black', (28,23,23), [264]*6]
+                      ],
                 
                 #stone brick moss/crack/circle variants:
                 98: [ [''],
-                      ['Mossy',  (100,100,100), [100]*6],
-                      ['Cracked',(100,100,100), [101]*6],
-                      ['Circle', (100,100,100), [213]*6],
+                      ['Mossy',  (100,100,100), [181]*6],
+                      ['Cracked',(100,100,100), [149]*6],
+                      ['Circle', (100,100,100), [117]*6],
                     ],
                 #hugebrownmush:
                 99: [ [''], #default (pores on all sides)
@@ -323,9 +376,33 @@ BLOCKVARIANTS = {
                       ['SdTS',(188,36,34),[142,125,142,125,142,142]],#8
                       ['CrTES',(188,36,34),[142,125,125,125,142,142]],#9
                       ['Stem',(215,211,200),[142,142,141,141,141,141]]#10
-                    ]
-                }
+                    ],
 
+                # stained clay
+                159: [[''], # ['White', (255,255,255), [384]*6],
+                      ['Orange', (255,150,54), [363]*6],	#custom tex coords!
+                      ['Magenta', (227,74,240), [362]*6],
+                      ['LightBlue', (83,146,255), [355]*6],
+                      ['Yellow', (225,208,31), [385]*6],
+                      ['LightGreen', (67,218,53), [361]*6],
+                      ['Pink', (248,153,178), [364]*6],
+                      ['Grey', (75,75,75), [358]*6],
+                      ['LightGrey', (181,189,189), [367]*6],
+                      ['Cyan', (45,134,172), [357]*6],
+                      ['Purple', (134,53,204), [365]*6],
+                      ['Blue', (44,58,176), [354]*6],
+                      ['Brown', (99,59,32), [356]*6],
+                      ['DarkGreen', (64,89,27), [359]*6],
+                      ['Red', (188,51,46), [366]*6],
+                      ['Black', (28,23,23), [354]*6]
+                      ],
+
+                # prismarine
+                168: [[''],
+                      ['Bricks', (127, 255, 212), [368]*6],
+                      ['Dark', (127, 255, 212), [400]*6],
+                      ]
+                }
 
 def readLevelDat():
     """Reads the level.dat for info like the world name, player inventory..."""
@@ -376,10 +453,8 @@ def readRegion(fname, vertexBuffer):
     print("Region file %s contains %d chunks." % (fname, chunkcount))
     return chunkcount
 
-
 def toChunkPos(pX,pZ):
     return (pX/16, pZ/16)
-
 
 def batchBuild(meshBuffer):
     #build all geom from pydata as meshes in one shot. :) This is fast.
@@ -451,7 +526,7 @@ This also ensures material and name are set."""
         if len(bdat) > 6:
             cycParams = bdat[6]
         if cycParams is None:
-            cycParams = {'emit': 0.0, 'transp': False}
+            cycParams = {'emit': 0.0, 'stencil': False}
     
     nameVariant = ''
     if blockID in BLOCKVARIANTS:
@@ -510,6 +585,7 @@ def slimeOn():
         slimeMat = bpy.data.materials[smname]
     else:
         slimeMat = bpy.data.materials.new(smname)
+        #FIXME - hard code color
         slimeMat.diffuse_color = [86/256.0, 139.0/256.0, 72.0/256.0]
         slimeMat.diffuse_shader = 'OREN_NAYAR'
         slimeMat.diffuse_intensity = 0.8
@@ -537,6 +613,7 @@ def batchSlimeChunks(slimes):
 
 def getWorldSelectList():
     worldList = []
+    MCSAVEPATH=sysutil.getMCSavePath()
     if os.path.exists(MCSAVEPATH):
         startpath = os.getcwd()
         os.chdir(MCSAVEPATH)
@@ -580,6 +657,7 @@ def hasNether(worldFolder):
     if worldFolder == "":
         return False
     worldList = []
+    MCSAVEPATH=sysutil.getMCSavePath()
     if os.path.exists(MCSAVEPATH):
         worldList = os.listdir(MCSAVEPATH)
         if worldFolder in worldList:
@@ -592,6 +670,7 @@ def hasEnd(worldFolder):
     if worldFolder == "":
         return False
     worldList = []
+    MCSAVEPATH=sysutil.getMCSavePath()
     if os.path.exists(MCSAVEPATH):
         worldList = os.listdir(MCSAVEPATH)
         if worldFolder in worldList:
@@ -623,6 +702,7 @@ def readMinecraftWorld(worldFolder, loadRadius, toggleOptions):
 #    print('[[[exluding these blocks: ', EXCLUDED_BLOCKS, ']]]')
     worldList = []
 
+    MCSAVEPATH=sysutil.getMCSavePath()
     if os.path.exists(MCSAVEPATH):
         worldList = os.listdir(MCSAVEPATH)
         #print("MC Path exists! %s" % os.listdir(MCPATH))
@@ -663,6 +743,7 @@ def readMinecraftWorld(worldFolder, loadRadius, toggleOptions):
         #It's singleplayer
         pPos = [posFloat.value for posFloat in worldData.value['Data'].value['Player'].value['Pos'].value ]     #in NBT, there's a lot of value...
         pSaveDim = worldData.value['Data'].value['Player'].value['Dimension'].value
+        print('Player: '+str(pSaveDim)+', ppos: '+str(pPos))
     else:
         #It's multiplayer.
         #Get SpawnX, SpawnY, SpawnZ and centre around those. OR

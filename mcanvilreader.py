@@ -265,7 +265,9 @@ class AnvilChunkReader(mcregionreader.ChunkReader):
         #'TileEntities' -- surely need this for piston data and stuff, no?
         
         entities = chunkLevelData['Entities'].value    # load ze sheeps!! # a list of tag-compounds.
-        AnvilChunkReader._loadEntities(entities)
+        #omitmobs = OPTIONS['omitmobs']
+        if not OPTIONS['omitmobs']:
+            AnvilChunkReader._loadEntities(entities)
 
         skyHighLimit = OPTIONS['highlimit']
         depthLimit   = OPTIONS['lowlimit']

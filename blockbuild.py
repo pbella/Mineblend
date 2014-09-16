@@ -1,20 +1,47 @@
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+#
+# Contributors:
+# Originally authored by Acro
+# Modified by Phil B
+
 import bpy
 from mathutils import *
 import os, sys
+from . import sysutil
+
+DEBUG_BBUV = False
+DEBUG_SHADER = False
 
 #create class for the other functions? BlockBuilder.
 
 #NICEIF: SpaceView3D.grid_subdivisions = 16 (so they're MC pixel-based)
 
-#TODO: tidy this up to one location (double defined here from mineregion)
-MCPATH = ''
-if sys.platform == 'darwin':
-    MCPATH = os.path.join(os.environ['HOME'], 'Library', 'Application Support', 'minecraft')
-elif sys.platform == 'linux':
-    MCPATH = os.path.join(os.environ['HOME'], '.minecraft')
-else:
-    MCPATH = os.path.join(os.environ['APPDATA'], '.minecraft')
-# This needs to be set by the addon during initial inclusion. Set as a bpy.props.StringProperty within the Scene, then refer to it all over this addon.
+TERRAIN_TEXTURE_ATLAS_NAME = 'textures_0.png' # based on the filename used by Minecraft (was terrain.png)
+TEXTURE_ATLAS_UNITS = 32 # Number of textures x & y in the texture atlas (was 16)
+TEXTURE_ATLAS_PIXELS_PER_UNIT = 16
+TEXTURE_ATLAS_PIXELS = 512 # Pixel w & h of the texture atlas (TEXTURE_ATLAS_UNITS*TEXTURE_ATLAS_PIXELS_PER_UNIT) (was 256)
+
+def getTextureAtlasU(faceTexId):
+    return faceTexId % TEXTURE_ATLAS_UNITS
+
+def getTextureAtlasV(faceTexId):
+    return  int(faceTexId / TEXTURE_ATLAS_UNITS)  #int division.
+
+def getUVUnit():
+    #The normalised size of a tx tile within the texture image.
+    return 1/TEXTURE_ATLAS_UNITS
 
 def isBMesh():
     majorver = bpy.app.version[0] * 100 + bpy.app.version[1]
@@ -51,7 +78,6 @@ def construct(blockID, basename, diffuseRGB, cubeTexFaces, extraData, constructT
         block = createMCBlock(basename, diffuseRGB, cubeTexFaces, cycParams)	#extra data	# soon to be removed as a catch-all!
     return block
 
-
 def getMCTex():
     tname = 'mcTexBlocks'
     if tname in bpy.data.textures:
@@ -69,32 +95,20 @@ def getMCTex():
     texNew.filter_type = 'BOX'    #no AA - nice minecraft pixels!
 
 def getMCImg():
-    global MCPATH
+    MCPATH = sysutil.getMCPath()
     osdir = os.getcwd()	#original os folder before jumping to temp.
-    if 'terrain.png' in bpy.data.images:
-        return bpy.data.images['terrain.png']
+    if TERRAIN_TEXTURE_ATLAS_NAME in bpy.data.images:
+        return bpy.data.images[TERRAIN_TEXTURE_ATLAS_NAME]
     else:
         img = None
-        # FIXME - older save file location/layout?  Current releases use a different file, location, and ordering within the file... should we expect saves upgraded to latest release or provide a multiple choice/user customizable texture mapping?
-        #import zipfile
-        #mcjar = os.path.sep.join([MCPATH, 'bin', 'minecraft.jar'])
-        # zf = open(mcjar, 'rb')
-        # zipjar = zipfile.ZipFile(zf)
-        # if 'terrain.png' in zipjar.namelist():
-        #    os.chdir(bpy.app.tempdir)
-        #    zipjar.extract('terrain.png')
-        # zipjar.close()
-        # zf.close()  #needed?
-        #    #
-        # temppath = os.path.sep.join([os.getcwd(), 'terrain.png'])
-        temppath = os.path.sep.join([MCPATH, 'textures_0.png']) # FIXME - code is expecting terrain.png and a different layout
+        temppath = os.path.sep.join([MCPATH, TERRAIN_TEXTURE_ATLAS_NAME])
         
         if os.path.exists(temppath):
             img = bpy.data.images.load(temppath)
         else:
             # generate a placeholder image for the texture if terrain.png doesn't exist (rather than failing)
             print("no terrain texture found... creating empty")
-            img = bpy.data.images.new('terrain.png', 1024, 1024, True, False)
+            img = bpy.data.images.new(TERRAIN_TEXTURE_ATLAS_NAME, 1024, 1024, True, False)
             img.source = 'FILE'
         os.chdir(osdir)
         return img
@@ -109,10 +123,10 @@ def getCyclesMCImg():
     
     if 'hiResTerrain.png' not in bpy.data.images:
         im1 = None
-        if 'terrain.png' not in bpy.data.images:
+        if TERRAIN_TEXTURE_ATLAS_NAME not in bpy.data.images:
             im1 = getMCImg()
         else:
-            im1 = bpy.data.images['terrain.png']
+            im1 = bpy.data.images[TERRAIN_TEXTURE_ATLAS_NAME]
 
         #Create second version/instance of it.
         im2 = im1.copy()
@@ -157,6 +171,8 @@ def createBMeshBlockCubeUVs(blockname, me, matrl, faceIndices):    #assume me is
     #bmesh face indices - a mapping to the new cube order
     #faceIndices face order is [Bottom,Top,Right,Front,Left,Back]
     #BMESH loop  face order is [left,back,right,front,bottom,top] (for default cube)
+    if DEBUG_BBUV:
+        print("createBMeshBlockCubeUVs "+blockname+" attempting to get faces: "+str(faceIndices))
     bmfi = [faceIndices[4], faceIndices[5], faceIndices[2], faceIndices[3], faceIndices[0], faceIndices[1]]
 
     #get the loop, and iterate it based on the me.polygons face info. yay!
@@ -170,7 +186,7 @@ def createBMeshBlockCubeUVs(blockname, me, matrl, faceIndices):    #assume me is
     #the 4 always-the-same offsets from the uv tile to get its corners
     #(anticlockwise from top right).
     #TODO: get image dimension to automagically work with hi-res texture packs.
-    uvUnit = 1/16.0     #one sixteenth, aka the normalised size of a tx tile within the texture image.
+    uvUnit = getUVUnit()
     #16px is 1/16th of the a 256x256 terrain.png. etc.
     #calculation of the tile location will get the top left corner, via "* 16".
 
@@ -196,14 +212,28 @@ def createBMeshBlockCubeUVs(blockname, me, matrl, faceIndices):    #assume me is
         face = meshtexfaces[faceNo]
         face.image = xim
         faceTexId = bmfi[faceNo]
-        #calculate the face location on the uvmap
-        mcTexU = faceTexId % 16
-        mcTexV = int(faceTexId / 16)  #int division.
-        #DEBUG print("minecraft chunk texture x,y within image: %d,%d" % (mcTexU, mcTexV))
-        #multiply by square size to get U1,V1 (topleft):
-        u1 = (mcTexU * 16.0) / 256.0    # or >> 4 (div by imagesize to get as fraction)
-        v1 = (mcTexV * 16.0) / 256.0    # ..
+        # FIXME - old 16x16 (256x256px) texture map
+        ##calculate the face location on the uvmap
+        #mcTexU = faceTexId % 16
+        #mcTexV = int(faceTexId / 16)  #int division.
+        ##multiply by square size to get U1,V1 (topleft):
+        #u1 = (mcTexU * 16.0) / 256.0    # or >> 4 (div by imagesize to get as fraction)
+        #v1 = (mcTexV * 16.0) / 256.0    # ..
+
+        # New 25x19 (512x512px) texture map
+        mcTexU = getTextureAtlasU(faceTexId)
+        mcTexV = getTextureAtlasV(faceTexId)
+
+        u1 = (mcTexU * TEXTURE_ATLAS_PIXELS_PER_UNIT) / TEXTURE_ATLAS_PIXELS
+        v1 = (mcTexV * TEXTURE_ATLAS_PIXELS_PER_UNIT) / TEXTURE_ATLAS_PIXELS
+
         v1 = 1.0 - v1 #y goes low to high   #DEBUG print("That means u1,v1 is %f,%f" % (u1,v1))
+        ##DEBUG
+        if DEBUG_BBUV:
+            print("mcTexU,mcTexV "+str(mcTexU)+", "+str(mcTexV)+" - u1, v1 %d,%d" % (u1,v1))
+            #print("minecraft chunk texture x,y within image: %d,%d" % (mcTexU, mcTexV))
+        #if DEBUG_BBUV:
+        #    print("createBMeshBlockCubeUVs "+blockname+" u1, v1: %d,%d" % (u1, v1))
 
         loopPolyStart = pface.loop_start  #where its verts start in the loop. Yay!
         #if loop total's not 4, need to work with ngons or tris or do more complex stuff.
@@ -221,6 +251,8 @@ def createBMeshBlockCubeUVs(blockname, me, matrl, faceIndices):    #assume me is
             mcUV = Vector((u1+offset[0], v1+offset[1]))
             #apply the calculated face uv + vert offset to the current loop element
 
+            if DEBUG_BBUV:
+                print("offset "+str(offset)+", mvUV "+str(mcUV))
             uvData[uvc].uv = mcUV
             uvx += 1
         faceNo += 1
@@ -273,27 +305,29 @@ def createBlockCubeUVs(blockname, me, matrl, faceIndices):    #assume me is a cu
         #Pick UV square off the 2D texture surface based on its Minecraft texture 'index'
         #eg 160 for lapis, 49 for glass, etc.
     
-        mcTexU = fid % 16
-        mcTexV = int(fid / 16)  #int division.
+        mcTexU = getTextureAtlasU(fid)
+        mcTexV = getTextureAtlasV(fid)
 
 
         #multiply by square size to get U1,V1:
-        u1 = (mcTexU * 16.0) / 256.0    # or >> 4 (div by imagesize to get as fraction)
-        v1 = (mcTexV * 16.0) / 256.0    # ..
+        u1 = (mcTexU * TEXTURE_ATLAS_PIXELS_PER_UNIT) / TEXTURE_ATLAS_PIXELS    # or >> 4 (div by imagesize to get as fraction)
+        v1 = (mcTexV * TEXTURE_ATLAS_PIXELS_PER_UNIT) / TEXTURE_ATLAS_PIXELS    # ..
         v1 = 1.0 - v1 #y goes low to high for some reason.
 
         #DEBUG print("That means u1,v1 is %f,%f" % (u1,v1))
         #16px will be 1/16th of the image.
         #The image is 256px wide and tall.
 
-        uvUnit = 1/16.0
+        uvUnit = getUVUnit()
 
         mcUV1 = Vector((u1,v1))
         mcUV2 = Vector((u1+uvUnit,v1))
         mcUV3 = Vector((u1+uvUnit,v1-uvUnit))  #subtract uvunit for y  
         mcUV4 = Vector((u1, v1-uvUnit))
 
-        #DEBUG print("Creating UVs for face with values: %f,%f to %f,%f" % (u1,v1,mcUV3[0], mcUV3[1]))
+        #DEBUG
+        if DEBUG_BBUV:
+            print("createBlockCubeUVs Creating UVs for face with values: %f,%f to %f,%f" % (u1,v1,mcUV3[0], mcUV3[1]))
 
         #We assume the cube faces are always the same order.
         #So, face 0 is the bottom.
@@ -366,8 +400,8 @@ def createInsetUVs(blockname, me, matrl, faceIndices, insets):
         matrl.game_settings.use_backface_culling = False
 
     #Insets are [bottom,top,sides]
-    uvUnit = 1/16.0
-    uvPixl = uvUnit / 16.0
+    uvUnit = getUVUnit()
+    uvPixl = uvUnit / TEXTURE_ATLAS_UNITS
     iB = insets[0] * uvPixl
     iT = insets[1] * uvPixl
     iS = insets[2] * uvPixl
@@ -380,13 +414,13 @@ def createInsetUVs(blockname, me, matrl, faceIndices, insets):
         
         #Pick UV square off the 2D texture surface based on its Minecraft index
         #eg 160 for lapis, 49 for glass... etc, makes for x,y:
-        mcTexU = fid % 16
-        mcTexV = int(fid / 16)  #int division.
+        mcTexU = getTextureAtlasU(fid)
+        mcTexV = getTextureAtlasV(fid)
         #DEBUG print("MC chunk tex x,y in image: %d,%d" % (mcTexU, mcTexV))
         #multiply by square size to get U1,V1:
 
-        u1 = (mcTexU * 16.0) / 256.0    # or >> 4 (div by imagesize to get as fraction)
-        v1 = (mcTexV * 16.0) / 256.0
+        u1 = (mcTexU * TEXTURE_ATLAS_PIXELS_PER_UNIT) / TEXTURE_ATLAS_PIXELS    # or >> 4 (div by imagesize to get as fraction)
+        v1 = (mcTexV * TEXTURE_ATLAS_PIXELS_PER_UNIT) / TEXTURE_ATLAS_PIXELS
         v1 = 1.0 - v1 #y goes low to high for some reason. (er...)
         #DEBUG print("That means u1,v1 is %f,%f" % (u1,v1))
     
@@ -494,15 +528,16 @@ def createBMeshInsetUVs(blockname, me, matrl, faceIndices, insets):
     uvData = blockUVLoop.data
 
     bmfi = [faceIndices[4], faceIndices[5], faceIndices[2], faceIndices[3], faceIndices[0], faceIndices[1]]
-    uvUnit = 1/16.0     #one sixteenth, aka the normalised size of a tx tile within the texture image.
+    uvUnit = getUVUnit()
     #Insets are [bottom,top,sides]
-    uvPixl = uvUnit / 16.0
+    uvPixl = uvUnit / TEXTURE_ATLAS_UNITS
     iB = insets[0] * uvPixl #insetBottom
     iT = insets[1] * uvPixl #insetTop
     iS = insets[2] * uvPixl #insetSides
 
     #Sorry. This array set is going to be dense, horrible, and impenetrable.
-    #For the simple version of this, see createBMeshUVs, not the insets one     #uvcorners is for sides. Xvalues affected by iS
+    #For the simple version of this, see createBMeshUVs, not the insets one
+    #uvcorners is for sides. Xvalues affected by iS
     uvcorners = [(uvUnit-iS, 0.0-iT), (0.0+iS,0.0-iT), (0.0+iS, -uvUnit+iB), (uvUnit-iS,-uvUnit+iB)]
     uvcornersTop = [(uvUnit-iS,-uvUnit+iS), (uvUnit-iS, 0.0-iS), (0.0+iS,0.0-iS), (0.0+iS, -uvUnit+iS)] # 4,1,2,3
     uvcornersBot = [(0.0+iS, -uvUnit+iS), (0.0+iS,0.0-iS), (uvUnit-iS, 0.0-iS), (uvUnit-iS,-uvUnit+iS)] # 3,2,1,4
@@ -520,12 +555,15 @@ def createBMeshInsetUVs(blockname, me, matrl, faceIndices, insets):
         face.image = xim
         faceTexId = bmfi[faceNo]
         #calculate the face location on the uvmap
-        mcTexU = faceTexId % 16
-        mcTexV = int(faceTexId / 16)  #int division.
-        #DEBUG print("minecraft chunk texture x,y within image: %d,%d" % (mcTexU, mcTexV))
+        mcTexU = getTextureAtlasU(faceTexId)
+        mcTexV = getTextureAtlasV(faceTexId)
+        #DEBUG
+        if DEBUG_BBUV:
+            print("createBMeshInsetUVs minecraft chunk texture x,y within image: %d,%d" % (mcTexU, mcTexV))
+
         #multiply by square size to get U1,V1 (topleft):
-        u1 = (mcTexU * 16.0) / 256.0    # or >> 4 (div by imagesize to get as fraction)
-        v1 = (mcTexV * 16.0) / 256.0    # ..
+        u1 = (mcTexU * TEXTURE_ATLAS_PIXELS_PER_UNIT) / TEXTURE_ATLAS_PIXELS    # or >> 4 (div by imagesize to get as fraction)
+        v1 = (mcTexV * TEXTURE_ATLAS_PIXELS_PER_UNIT) / TEXTURE_ATLAS_PIXELS    # ..
         v1 = 1.0 - v1 #y goes low to high   #DEBUG print("That means u1,v1 is %f,%f" % (u1,v1))
 
         loopPolyStart = pface.loop_start  #where its verts start in the loop. Yay!
@@ -553,23 +591,240 @@ def createBMeshInsetUVs(blockname, me, matrl, faceIndices, insets):
     return "".join([blockname, 'UVs'])
     
 
-#CYCLES! Exciting!
+# Cycles materials.  createNGmc* are for Node Groups and create*CyclesMat are the for the materials that use them.
+#
+# Aside from simplifying the individual material layouts, the reason for using Node Groups extensively is to allow for users to easily customize the overall look of their scene (i.e. rather than having to modify dozens of materials, some changes can have global effect by modifying a single Node Group, depending on the change desired)
 
-#for an emission, we just replace the diffuse node (Diffuse BDSF) with an Emission node (EMISSION)
-# You can't just change the type as it's read-only, so will need to create a new node of the right type,
-# put it in the old BSDF node's location, then swap the inputs and finally delete the old (disconnected)
-#diffuse node.
-# For transparency, need to script-in A'n'W's setup.
+MC_SHADER_TEX="mcShaderTex"
+MC_SHADER_DIFFUSE="mcShaderDiffuse"
+MC_SHADER_STENCIL="mcShaderStencil"
+MC_SHADER_STENCIL_COLORED="mcShaderStencilColored"
+MC_GROUP_TEX_OUTPUT="Color"
+MC_GROUP_DIFFUSE_OUTPUT="BSDF"
+MC_GROUP_STENCIL_OUTPUT="Shader"
+MC_GROUP_STENCIL_COLORED_OUTPUT="Shader"
+TYPE_NODE_GROUP_INPUT="NodeGroupInput"
+TYPE_NODE_GROUP_OUTPUT="NodeGroupOutput"
+TYPE_NODE_GROUP="ShaderNodeGroup"
+BSDF_OUTPUT="BSDF"
+FACTOR_INPUT="Fac"
+
+def createNGmcTexture():
+    """Node Group for texture.  This is a simple texture atlas mapping"""
+    if DEBUG_SHADER:
+        print("createNGmcTexture")
+    ng = bpy.data.node_groups.new(MC_SHADER_TEX,"ShaderNodeTree")
+    ngo = ng.nodes.new(type=TYPE_NODE_GROUP_OUTPUT)
+    texCoord = ng.nodes.new(type="ShaderNodeTexCoord")
+    imageTex = ng.nodes.new(type="ShaderNodeTexImage")
+    imageTex.image = getMCImg()
+    imageTex.interpolation = "Closest"
+
+    ng.links.new(imageTex.inputs[0],texCoord.outputs[2]) # link the texCoord uv to the imageTex vector
+    ng.links.new(ngo.inputs[0],imageTex.outputs[0])
+    ng.links.new(ngo.inputs[1],imageTex.outputs[1])
+
+    texCoord.location = Vector((-200, 200))
+    imageTex.location = Vector((0, 200))
+    ngo.location = Vector((200, 200))
+
+def setNodeGroup(node,ngName):
+    if DEBUG_SHADER:
+        print("setNodeGroup: "+ngName)
+    # FIXME - is there a better way to use a node group from within a node group?
+    node.name=ngName
+    node.label=ngName
+    node.node_tree=bpy.data.node_groups[ngName]
+
+def createNGmcDiffuse():
+    """Node Group for diffuse materials"""
+    if DEBUG_SHADER:
+        print("createNGmcDiffuse")
+    ng = bpy.data.node_groups.new(MC_SHADER_DIFFUSE,"ShaderNodeTree")
+    ngo = ng.nodes.new(type=TYPE_NODE_GROUP_OUTPUT)
+    tex = ng.nodes.new(type=TYPE_NODE_GROUP)
+    setNodeGroup(tex,MC_SHADER_TEX)
+    diffuse = ng.nodes.new(type="ShaderNodeBsdfDiffuse")
+
+    ng.links.new(diffuse.inputs[0],tex.outputs[0]) # link the texCoord uv to the imageTex vector
+    ng.links.new(ngo.inputs[0],diffuse.outputs[0])
+    ng.links.new(ngo.inputs[1],tex.outputs[1]) # For stained glass etc
+
+    tex.location = Vector((0, 0))
+    diffuse.location = Vector((200, 200))
+    ngo.location = Vector((400, 0))
+
+#def createNGmcStencil(): # FIXME - how to handle alternate node data flows? (i.e. loopback / inner node group issue)
+#    ng = bpy.data.node_groups.new(MC_SHADER_STENCIL,"ShaderNodeTree")
+#    ngo = ng.nodes.new(type="NodeGroupOutput")
+#    ngi = ng.nodes.new(type="NodeGroupInput")
+#    diffNode = ng.nodes.new(type="ShaderNodeGroup")
+#    setNodeGroup(diffNode,MC_SHADER_DIFFUSE)
+#
+#    links = ng.links
+#
+#    rgbtobwNode = ng.nodes.new(type="ShaderNodeRGBToBW")
+#    gtNode = ng.nodes.new(type="ShaderNodeMath")
+#    gtNode.name = "AlphaBlackGT"
+#    gtNode.operation = 'GREATER_THAN'
+#    gtNode.inputs[0].default_value = 0.001
+#
+#    transpNode = ng.nodes.new(type="ShaderNodeBsdfTransparent")
+#    mixNode = ng.nodes.new(type="ShaderNodeMixShader")
+#
+#    ngi.location = Vector((-200,0))
+#    diffNode.location = Vector((0,0))
+#    rgbtobwNode.location = Vector((200,200))
+#    gtNode.location = Vector((400,200))
+#    transpNode.location = Vector((400,-200))
+#    mixNode.location = Vector((600,0))
+#    ngo.location = Vector((800,0))
+#
+#    links.new(input=diffNode.outputs[MC_GROUP_DIFFUSE_OUTPUT], output=rgbtobwNode.inputs['Color'])
+#    links.new(input=rgbtobwNode.outputs['Val'], output=gtNode.inputs[1])
+#    links.new(input=gtNode.outputs['Value'], output=mixNode.inputs['Fac'])
+#
+#    #links.new(input=diffNode.outputs[MC_GROUP_DIFFUSE_OUTPUT], output=diff2Node.inputs['Color'])
+#    #links.new(input=diff2Node.outputs['BSDF'], output=mixNode.inputs[1])
+#
+#    # leave the options open
+#    #links.new(input=diffNode.outputs['BSDF'], output=mixNode.inputs[1])
+#
+#    links.new(input=transpNode.outputs['BSDF'], output=mixNode.inputs[2])
+#
+#    links.new(input=ngi.outputs[0], output=mixNode.inputs[1])
+#
+#    #links.new(input=mixNode.outputs['Shader'], output=ngo.inputs['Surface'])
+#    links.new(input=mixNode.outputs['Shader'], output=ngo.inputs[0])
+#    links.new(input=diffNode.outputs['BSDF'], output=ngo.inputs[1])
+
+def createNGmcStencil():
+    """Node Group for stencil materials (i.e. colored textures with alpha)"""
+    if DEBUG_SHADER:
+        print("createNGmcStencil")
+    ng = bpy.data.node_groups.new(MC_SHADER_STENCIL,"ShaderNodeTree")
+    ngo = ng.nodes.new(type=TYPE_NODE_GROUP_OUTPUT)
+    ngi = ng.nodes.new(type=TYPE_NODE_GROUP_INPUT)
+    inNode = ng.nodes.new(type=TYPE_NODE_GROUP)
+    setNodeGroup(inNode,MC_SHADER_TEX)
+
+    links = ng.links
+
+    diffNode = ng.nodes.new(type="ShaderNodeBsdfDiffuse")
+    rgbtobwNode = ng.nodes.new(type="ShaderNodeRGBToBW")
+    gtNode = ng.nodes.new(type="ShaderNodeMath")
+    gtNode.name = "AlphaBlackGT"
+    gtNode.operation = 'GREATER_THAN'
+    gtNode.inputs[0].default_value = 0.001
+
+    transpNode = ng.nodes.new(type="ShaderNodeBsdfTransparent")
+    mixNode = ng.nodes.new(type="ShaderNodeMixShader")
+
+    ngi.location = Vector((-200,0))
+    inNode.location = Vector((0,0))
+    rgbtobwNode.location = Vector((200,200))
+    diffNode.location = Vector((200,0))
+    gtNode.location = Vector((400,200))
+    transpNode.location = Vector((400,-200))
+    mixNode.location = Vector((600,0))
+    ngo.location = Vector((800,0))
+
+    links.new(input=inNode.outputs[MC_GROUP_TEX_OUTPUT], output=rgbtobwNode.inputs['Color'])
+    links.new(input=rgbtobwNode.outputs['Val'], output=gtNode.inputs[1])
+    links.new(input=gtNode.outputs['Value'], output=mixNode.inputs[FACTOR_INPUT])
+
+    # leave the options open
+    links.new(input=inNode.outputs[MC_GROUP_TEX_OUTPUT], output=diffNode.inputs['Color'])
+    links.new(input=diffNode.outputs[BSDF_OUTPUT], output=mixNode.inputs[1])
+
+    links.new(input=transpNode.outputs[BSDF_OUTPUT], output=mixNode.inputs[2])
+
+    links.new(input=mixNode.outputs['Shader'], output=ngo.inputs[0])
+
+def createNGmcStencilColored():
+    """Node Group for colored stencil materials (i.e. grey scale texture with alpha that needs to be colored)"""
+    if DEBUG_SHADER:
+        print("createNGmcStencilColored")
+    ng = bpy.data.node_groups.new(MC_SHADER_STENCIL_COLORED,"ShaderNodeTree")
+    ngo = ng.nodes.new(type=TYPE_NODE_GROUP_OUTPUT)
+    ngi = ng.nodes.new(type=TYPE_NODE_GROUP_INPUT)
+    texNode = ng.nodes.new(type=TYPE_NODE_GROUP)
+    setNodeGroup(texNode,MC_SHADER_TEX)
+
+    links = ng.links
+
+    rgbtobwNode = ng.nodes.new(type="ShaderNodeRGBToBW")
+    gtNode = ng.nodes.new(type="ShaderNodeMath")
+    gtNode.name = "AlphaBlackGT"
+    gtNode.operation = 'GREATER_THAN'
+    gtNode.inputs[0].default_value = 0.001
+
+    transpNode = ng.nodes.new(type="ShaderNodeBsdfTransparent")
+    alphaMixNode = ng.nodes.new(type="ShaderNodeMixShader")
+
+    ngi.location = Vector((-200,0))
+    texNode.location = Vector((0,0))
+    rgbtobwNode.location = Vector((200,200))
+    gtNode.location = Vector((400,200))
+    transpNode.location = Vector((400,-200))
+    alphaMixNode.location = Vector((600,0))
+    ngo.location = Vector((800,0))
+
+    links.new(input=texNode.outputs[MC_GROUP_TEX_OUTPUT], output=rgbtobwNode.inputs['Color'])
+    links.new(input=rgbtobwNode.outputs['Val'], output=gtNode.inputs[1])
+    links.new(input=gtNode.outputs['Value'], output=alphaMixNode.inputs[FACTOR_INPUT])
+
+    links.new(input=transpNode.outputs[BSDF_OUTPUT], output=alphaMixNode.inputs[2])
+
+    links.new(input=alphaMixNode.outputs['Shader'], output=ngo.inputs[0])
+
+    ## 'colored' specific portion of material
+    colorMixNode = ng.nodes.new(type="ShaderNodeMixRGB")
+    #colorMixNode.inputs[1].name="Dark color"
+    #colorMixNode.inputs[2].name="Light color"
+    colorDiffNode = ng.nodes.new(type="ShaderNodeBsdfDiffuse")
+
+    colorMixNode.location = Vector((0,400))
+    colorDiffNode.location = Vector((200,400))
+
+    links.new(input=rgbtobwNode.outputs['Val'], output=colorMixNode.inputs[FACTOR_INPUT])
+    # FIXME - material will not render correctly when names are set (i.e. even though the viewport looks fine, the rgb color mix needs to be re-added and links re-established for successful (i.e. non-black) render.)
+    #colorMixNode.inputs[1].name="Dark color"
+    #colorMixNode.inputs[2].name="Light color"
+    #links.new(input=ngi.outputs[0], output=colorMixNode.inputs["Dark color"])
+    #links.new(input=ngi.outputs[1], output=colorMixNode.inputs["Light color"])
+    links.new(input=ngi.outputs[0], output=colorMixNode.inputs[1])
+    links.new(input=ngi.outputs[1], output=colorMixNode.inputs[2])
+
+    links.new(input=colorMixNode.outputs["Color"], output=colorDiffNode.inputs["Color"])
+    links.new(input=colorDiffNode.outputs[BSDF_OUTPUT], output=alphaMixNode.inputs[1])
+    ngi.outputs[1].name="Dark color"
+    ngi.outputs[2].name="Light color"
+
+def createNodeGroups():
+    """Create node groups if they don't already exist"""
+    if DEBUG_SHADER:
+        print("createNodeGroups")
+    existsNode = bpy.data.node_groups.get(MC_SHADER_DIFFUSE)
+    if existsNode==None:
+        createNGmcTexture()
+        createNGmcDiffuse()
+        createNGmcStencil()
+        createNGmcStencilColored()
+
+def removeExistingDiffuseNode(ntree):
+    olddif = ntree.nodes['Diffuse BSDF']
+    ntree.nodes.remove(olddif)
 
 def createDiffuseCyclesMat(mat):
-    """Changes a BI basic textured, diffuse material for use with Cycles.
-    Assumes that the material in question already has an associated UV Mapping."""
-
+    """Create a basic textured, diffuse material that uses existing UV mapping into texture atlas"""
+    if DEBUG_SHADER:
+        print("createDiffuseCyclesMat")
     #compatibility with Blender 2.5x:
     if not hasattr(bpy.context.scene, 'cycles'):
         print("No cycles support... skipping")
         return
-    
+
     #Switch render engine to Cycles. Yippee ki-yay!
     if bpy.context.scene.render.engine != 'CYCLES':
         bpy.context.scene.render.engine = 'CYCLES'
@@ -578,173 +833,250 @@ def createDiffuseCyclesMat(mat):
 
     #maybe check number of nodes - there should be 2.
     ntree = mat.node_tree
-    
-    #print("Examining material nodetree for %s!" % mat.name)
-    #print("["%s,%s" % (n.name, n.type) for n in mat.node_tree.nodes]")
-    
-    #get refs to existing nodes:
-    diffNode = ntree.nodes['Diffuse BSDF']
+    mcdif = ntree.nodes.new(type=TYPE_NODE_GROUP)
+    setNodeGroup(mcdif,MC_SHADER_DIFFUSE)
+    removeExistingDiffuseNode(ntree)
     matOutNode = ntree.nodes['Material Output']
-    #add the two new ones we need (texture inputs)
-    #imgTexNode = ntree.nodes.new(type='TEX_IMAGE')
-    imgTexNode = ntree.nodes.new(type='ShaderNodeTexImage')
-    #texCoordNode = ntree.nodes.new(type='TEX_COORD')
-    texCoordNode = ntree.nodes.new(type='ShaderNodeTexCoord')
-
-    #Plug the UVs from texCoord into the Image texture (and assign the image from existing texture!)
-    #img = mat. texture? .image?
-    imgTexNode.image = getMCImg() ##bpy.data.images['terrain.png']   #hardwired for MCraft...
-    #maybe imgTexNode.color_space = 'LINEAR' needed?! probably yes...
-    
-    ntree.links.new(input=texCoordNode.outputs['UV'], output=imgTexNode.inputs['Vector'])
-
-    #Plug the image output into the diffuseNode's Color input
-    ntree.links.new(input=imgTexNode.outputs['Color'], output=diffNode.inputs['Color'])
-    
-    #Arrange the nodes in a clean layout:
-    texCoordNode.location = Vector((-200, 200))
-    imgTexNode.location = Vector((0, 200))
-    diffNode.location = Vector((250,200))
-    matOutNode.location = Vector((450,200))
-
+    ntree.links.new(input=mcdif.outputs[MC_GROUP_DIFFUSE_OUTPUT], output=matOutNode.inputs['Surface'])
+    mcdif.location = Vector((0,0))
+    matOutNode.location = Vector((200,0))
 
 def createEmissionCyclesMat(mat, emitAmt):
-    """Changes a BI basic textured, diffuse material for use with Cycles.
-    Sets up the same as a diffuse cycles material, but with emission instead of Diffuse BDSF.
-    Assumes that the material in question already has an associated UV Mapping."""
+    """Emissive materials such as lava, glowstone, etc"""
+    if DEBUG_SHADER:
+        print("createEmissionCyclesMat")
+    if bpy.context.scene.render.engine != 'CYCLES':
+        bpy.context.scene.render.engine = 'CYCLES'
 
-    createDiffuseCyclesMat(mat)
+    mat.use_nodes = True
 
     ntree = mat.node_tree   #there will now be 4 nodes in there, one of them being the diffuse shader.
+    removeExistingDiffuseNode(ntree)
+    diffNode = ntree.nodes.new(type=TYPE_NODE_GROUP)
+    setNodeGroup(diffNode,MC_SHADER_TEX)
+    matNode = ntree.nodes['Material Output']
+    emitNode = ntree.nodes.new(type='ShaderNodeEmission')
     nodes = ntree.nodes
     links = ntree.links
 
-    #get ref to existing nodes:
-    diffNode = nodes['Diffuse BSDF']
-    #emitNode = nodes.new(type='EMISSION')
-    emitNode = nodes.new(type='ShaderNodeEmission')
-
-    #position emission node on same place as diff was:
-    #loc = diffNode.location
-    #emitNode.location = loc
-    emitNode.location = diffNode.location
+    diffNode.location = Vector((0,0))
+    emitNode.location = Vector((200,0))
+    matNode.location = Vector((400,0))
 
     #change links: delete the old links and add new ones.
 
-    colorDiffSockIn = diffNode.inputs['Color']
     emitNode.inputs['Strength'].default_value = float(emitAmt) #set this from the EMIT value of data passed in.
 
-    bsdfDiffSockOut = diffNode.outputs['BSDF']
+    bsdfDiffSockOut = diffNode.outputs[MC_GROUP_TEX_OUTPUT]
     emitSockOut = emitNode.outputs[0]
 
     for nl in links:
-        if nl.to_socket == colorDiffSockIn:
+        print("link "+str(nl))
+        if nl.to_socket == matNode:
             links.remove(nl)
 
-        # FIXME - ReferenceError: StructRNA of type NodeLink has been removed
-        #if nl.from_socket == bsdfDiffSockOut:
-        #    links.remove(nl)
-
-    #now create new linkages to the new emit node:
-
-    matOutNode = nodes['Material Output']
-    imgTexNode = nodes['Image Texture']
-    links.new(input=imgTexNode.outputs['Color'], output=emitNode.inputs['Color'])
-    links.new(input=emitNode.outputs[0], output=matOutNode.inputs['Surface'])
-
-    #and remove the diffuse shader, which is no longer needed.
-    nodes.remove(diffNode)
+    links.new(input=diffNode.outputs[0], output=emitNode.inputs[0])
+    links.new(input=emitNode.outputs[0], output=matNode.inputs['Surface'])
 
 
-def createPlainTransparentCyclesMat(mat):
-    """Creates an 'alpha-transparent' Cycles material with no colour-cast overlay.
-    Useful for objects such as Ladders, Doors, Flowers, Tracks, etc. """
-
+def createStencilCyclesMat(mat):
+    """Stencil materials such as flowers"""
+    if DEBUG_SHADER:
+        print("createStencilCyclesMat")
     #Ensure Cycles is in use
     if bpy.context.scene.render.engine != 'CYCLES':
         bpy.context.scene.render.engine = 'CYCLES'
     mat.use_nodes = True
 
     ntree = mat.node_tree
-    ntree.nodes.clear()
-
-    #Create all needed nodes:
-    #nn = ntree.nodes.new(type="TEX_COORD")
-    nn = ntree.nodes.new(type="ShaderNodeTexCoord")
-    nn.name = "Texture Coordinate"
-    nn.location = Vector((-200.000, 200.000))
-    #nn = ntree.nodes.new(type="OUTPUT_MATERIAL")
-    nn = ntree.nodes.new(type="ShaderNodeOutputMaterial")
-    nn.name = "Material Output"
-    nn.location = Vector((850.366, 221.132))
-    #nn.inputs['Displacement'].default_value = 0.0
-    #nn = ntree.nodes.new(type="TEX_IMAGE")
-    nn = ntree.nodes.new(type="ShaderNodeTexImage")
-    nn.name = "Image Texture"
-    nn.location = Vector((35.307, 172.256))
-    #nn.inputs['Vector'].default_value = bpy.data.node_groups['Shader Nodetree'].nodes["Image Texture"].inputs[0].default_value
-    nn.image = getCyclesMCImg()
-    
-    #todo: fix/set the image texture. This needs to be the scaled-up one, here. So make it the normal one, but with a different name.
-    #check diffuse for how this gets set to the right value!
-    #nn = ntree.nodes.new(type="RGBTOBW")
-    nn = ntree.nodes.new(type="ShaderNodeRGBToBW")
-    nn.name = "RGB to BW"
-    nn.location = Vector((217.001, 274.182))
-
-    #nn = ntree.nodes.new(type="MATH")
-    nn = ntree.nodes.new(type="ShaderNodeMath")
-    nn.name = "AlphaBlackGT"
-    nn.operation = 'GREATER_THAN'
-    nn.location = Vector((387.480, 325.267))
-    nn.inputs[0].default_value = 0.001
-    #nn.inputs[1].default_value = 0.001
-    #nn = ntree.nodes.new(type="BSDF_DIFFUSE")
-    nn = ntree.nodes.new(type="ShaderNodeBsdfDiffuse")
-    nn.name = "Diffuse BSDF"
-    nn.location = Vector((357.214, 181.751))
-    ###nn.inputs['Color'].default_value = bpy.data.node_groups['Shader Nodetree'].nodes["Diffuse BSDF"].inputs[0].default_value
-    nn.inputs['Roughness'].default_value = 0.0
-    #nn = ntree.nodes.new(type="BSDF_TRANSPARENT")
-    nn = ntree.nodes.new(type="ShaderNodeBsdfTransparent")
-    nn.name = "Transparent BSDF"
-    nn.location = Vector((356.909, 70.560))
-    ###nn.inputs['Color'].default_value = bpy.data.node_groups['Shader Nodetree'].nodes["Transparent BSDF"].inputs[0].default_value
-    #nn = ntree.nodes.new(type="MIX_SHADER")
-    nn = ntree.nodes.new(type="ShaderNodeMixShader")
-    nn.name = "Mix Shader"
-    nn.location = Vector((641.670, 223.397))
-    nn.inputs['Fac'].default_value = 0.5
-
-    #link creation
-    nd = ntree.nodes
+    nodes = ntree.nodes
     links = ntree.links
-    links.new(input=nd['Diffuse BSDF'].outputs['BSDF'], output=nd['Mix Shader'].inputs[1])
-    links.new(input=nd['Texture Coordinate'].outputs['UV'], output=nd['Image Texture'].inputs['Vector'])
-    links.new(input=nd['Image Texture'].outputs['Color'], output=nd['Diffuse BSDF'].inputs['Color'])
-    links.new(input=nd['Image Texture'].outputs['Color'], output=nd['RGB to BW'].inputs['Color'])
-    links.new(input=nd['Mix Shader'].outputs['Shader'], output=nd['Material Output'].inputs['Surface'])
-    links.new(input=nd['Transparent BSDF'].outputs['BSDF'], output=nd['Mix Shader'].inputs[2])
-    links.new(input=nd['AlphaBlackGT'].outputs['Value'], output=nd['Mix Shader'].inputs['Fac'])
-    links.new(input=nd['RGB to BW'].outputs['Val'], output=nd['AlphaBlackGT'].inputs[1])    #2nd input. Tres importante.
+    inNode =  ntree.nodes.new(type=TYPE_NODE_GROUP)
+    setNodeGroup(inNode,MC_SHADER_TEX)
+    diffNode = nodes["Diffuse BSDF"] # reuse the one that already exists
+    matNode = nodes['Material Output']
 
+    rgbtobwNode = ntree.nodes.new(type="ShaderNodeRGBToBW")
+    gtNode = ntree.nodes.new(type="ShaderNodeMath")
+    gtNode.name = "AlphaBlackGT"
+    gtNode.operation = 'GREATER_THAN'
+    gtNode.inputs[0].default_value = 0.001
+
+    transpNode = ntree.nodes.new(type="ShaderNodeBsdfTransparent")
+    mixNode = ntree.nodes.new(type="ShaderNodeMixShader")
+
+    inNode.location = Vector((0,0))
+    diffNode.location = Vector((200,0))
+    rgbtobwNode.location = Vector((200,200))
+    gtNode.location = Vector((400,200))
+    transpNode.location = Vector((400,-200))
+    mixNode.location = Vector((600,0))
+    matNode.location = Vector((800,0))
+
+    for nl in links:
+        if nl.to_socket == matNode:
+            links.remove(nl)
+
+    links.new(input=inNode.outputs[MC_GROUP_TEX_OUTPUT], output=rgbtobwNode.inputs['Color'])
+    links.new(input=rgbtobwNode.outputs['Val'], output=gtNode.inputs[1])
+    links.new(input=gtNode.outputs['Value'], output=mixNode.inputs[FACTOR_INPUT])
+
+    links.new(input=inNode.outputs[MC_GROUP_TEX_OUTPUT], output=diffNode.inputs["Color"])
+    links.new(input=diffNode.outputs[BSDF_OUTPUT], output=mixNode.inputs[1])
+
+    links.new(input=transpNode.outputs[BSDF_OUTPUT], output=mixNode.inputs[2])
+
+    links.new(input=mixNode.outputs['Shader'], output=matNode.inputs['Surface'])
+
+
+def createLeafCyclesMat(mat):
+    """Colored stencil materials such as leaves"""
+    if DEBUG_SHADER:
+        print("createLeafCyclesMat")
+    """Very similar to the transparent (glass) material but different enough to need its own"""
+    #Ensure Cycles is in use
+    if bpy.context.scene.render.engine != 'CYCLES':
+        bpy.context.scene.render.engine = 'CYCLES'
+    mat.use_nodes = True
+
+    ntree = mat.node_tree   #there will now be 4 nodes in there, one of them being the diffuse shader.
+    removeExistingDiffuseNode(ntree)
+    nodes = ntree.nodes
+    links = ntree.links
+    stencilNode = ntree.nodes.new(type=TYPE_NODE_GROUP)
+    setNodeGroup(stencilNode,MC_SHADER_STENCIL_COLORED)
+    matNode = nodes['Material Output']
+    darkColorNode = ntree.nodes.new(type="ShaderNodeRGB")
+    darkColorNode.outputs[0].default_value = (0.01, 0.0185002, 0.0137021, 1)
+    lightColorNode = ntree.nodes.new(type="ShaderNodeRGB")
+    lightColorNode.outputs[0].default_value = (0.098, 0.238398, 0.135633, 1)
+
+    darkColorNode.location = Vector((0, 200))
+    lightColorNode.location = Vector((0, 0))
+    stencilNode.location = Vector((400,0))
+    matNode.location = Vector((600,0))
+
+    links.new(input=darkColorNode.outputs['Color'], output=stencilNode.inputs[0])
+    links.new(input=lightColorNode.outputs['Color'], output=stencilNode.inputs[1])
+    links.new(input=stencilNode.outputs['Shader'], output=matNode.inputs['Surface'])
+
+def createLeafCyclesMatOld(mat):
+    """Very similar to the transparent (glass) material but different enough to need its own"""
+    if DEBUG_SHADER:
+        print("createLeafCyclesMat")
+    #Ensure Cycles is in use
+    if bpy.context.scene.render.engine != 'CYCLES':
+        bpy.context.scene.render.engine = 'CYCLES'
+    mat.use_nodes = True
+
+    ntree = mat.node_tree   #there will now be 4 nodes in there, one of them being the diffuse shader.
+    nodes = ntree.nodes
+    links = ntree.links
+    removeExistingDiffuseNode(ntree)
+    diffNode = ntree.nodes.new(type=TYPE_NODE_GROUP)
+    setNodeGroup(diffNode,MC_SHADER_TEX)
+    matNode = nodes['Material Output']
+
+    rgbtobwNode = ntree.nodes.new(type="ShaderNodeRGBToBW")
+    gtNode = ntree.nodes.new(type="ShaderNodeMath")
+    gtNode.name = "AlphaBlackGT"
+    gtNode.operation = 'GREATER_THAN'
+    gtNode.inputs[0].default_value = 0.001
+
+    transpNode = ntree.nodes.new(type="ShaderNodeBsdfTransparent")
+    mixNode = ntree.nodes.new(type="ShaderNodeMixShader")
+
+    diffNode.location = Vector((0,0))
+    rgbtobwNode.location = Vector((200,200))
+    gtNode.location = Vector((400,200))
+    transpNode.location = Vector((400,-200))
+    mixNode.location = Vector((600,0))
+    matNode.location = Vector((800,0))
+
+    for nl in links:
+        if nl.to_socket == matNode:
+            links.remove(nl)
+
+    links.new(input=diffNode.outputs[MC_GROUP_TEX_OUTPUT], output=rgbtobwNode.inputs['Color'])
+    links.new(input=rgbtobwNode.outputs['Val'], output=gtNode.inputs[1])
+    links.new(input=gtNode.outputs['Value'], output=mixNode.inputs[FACTOR_INPUT])
+
+    # Leaf difference: feed the matl color into transparent... not needed? FIXME
+    links.new(input=transpNode.outputs[BSDF_OUTPUT], output=mixNode.inputs[2])
+
+    links.new(input=mixNode.outputs['Shader'], output=matNode.inputs['Surface'])
+
+    # Leaf specific portion of material
+    lcrampNode = ntree.nodes.new(type="ShaderNodeValToRGB")
+    lcrampNode.color_ramp.elements[1].color = (0.098, 0.238398, 0.135633, 1)
+    lcrampNode.color_ramp.elements[0].color = (0.01, 0.0185002, 0.0137021, 1)
+    ldiffNode = ntree.nodes.new(type="ShaderNodeBsdfDiffuse")
+
+    lcrampNode.location = Vector((400,500))
+    ldiffNode.location = Vector((700,500))
+
+    links.new(input=rgbtobwNode.outputs['Val'], output=lcrampNode.inputs[FACTOR_INPUT])
+    links.new(input=lcrampNode.outputs['Color'], output=ldiffNode.inputs['Color'])
+    links.new(input=ldiffNode.outputs[BSDF_OUTPUT], output=mixNode.inputs[1])
+
+def createPlainAlphaCyclesMat(mat):
+    """Partially transparent materials such as stained glass"""
+    if DEBUG_SHADER:
+        print("createPlainAlphaCyclesMat")
+    #Ensure Cycles is in use
+    if bpy.context.scene.render.engine != 'CYCLES':
+        bpy.context.scene.render.engine = 'CYCLES'
+    mat.use_nodes = True
+
+    ntree = mat.node_tree
+    nodes = ntree.nodes
+
+    createDiffuseCyclesMat(mat)
+    diffNode = nodes[MC_SHADER_DIFFUSE]
+    matNode = nodes['Material Output']    
+
+    transpNode = ntree.nodes.new(type="ShaderNodeBsdfTransparent")
+    mixNode = ntree.nodes.new(type="ShaderNodeMixShader")
+
+    diffNode.location = Vector((0,0))
+    transpNode.location = Vector((200,-200))
+    mixNode.location = Vector((400,0))
+    matNode.location = Vector((600,0))
+
+    links = ntree.links
+    # FIXME - does reversing order of inputs give the right effect for stained glass?
+    links.new(input=diffNode.outputs[BSDF_OUTPUT], output=mixNode.inputs[2])
+    links.new(input=diffNode.outputs['Alpha'], output=mixNode.inputs[FACTOR_INPUT])
+    links.new(input=transpNode.outputs[BSDF_OUTPUT], output=mixNode.inputs[1])
+    links.new(input=mixNode.outputs['Shader'], output=matNode.inputs['Surface'])
 
 
 def setupCyclesMat(material, cyclesParams):
+    if DEBUG_SHADER:
+        print("setupCyclesMat")
+    createNodeGroups()
     if 'emit' in cyclesParams:
         emitAmt = cyclesParams['emit']
         if emitAmt > 0.0:
             createEmissionCyclesMat(material, emitAmt)
             return
 
-    if 'transp' in cyclesParams and cyclesParams['transp']: #must be boolean true
+    if 'stencil' in cyclesParams and cyclesParams['stencil']: #must be boolean true
         if 'ovr' in cyclesParams:
             #get the overlay colour, and create a transp overlay material.
             return
         #not overlay
-        createPlainTransparentCyclesMat(material)
+        createStencilCyclesMat(material)
         return
     
+    if 'alpha' in cyclesParams and cyclesParams['alpha']:
+        createPlainAlphaCyclesMat(material)
+        return
+
+    if 'leaf' in cyclesParams and cyclesParams['leaf']:
+        createLeafCyclesMat(material)
+        return
+
     createDiffuseCyclesMat(material)
 
 
@@ -790,7 +1122,7 @@ Units are in Minecraft texels - so from 1 to 15. Inset 16 is an error."""
     if blockname in bpy.data.objects:
         return bpy.data.objects[blockname]
 
-    pxlUnit = 1/16.0    #const
+    pxlUnit = getUVUnit()
     #Base cube
     bpy.ops.object.mode_set(mode='OBJECT')  #just to be sure... needed?
     bpy.ops.mesh.primitive_cube_add()
@@ -1069,7 +1401,7 @@ def createBMeshXBlockUVs(blockname, me, matrl, faceIndices):    #assume me is an
         faceIndices = [fOnly, fOnly]    #probably totally unecessary safety.
 
     bmfi = [faceIndices[0], faceIndices[1]]
-    uvUnit = 1/16.0 #the normalised size of a tx tile within the texture image.
+    uvUnit = getUVUnit()
     #offsets from topleft of any uv 'tile' to its vert corners (CCW from TR):
     uvcorners = [(uvUnit, 0.0), (0.0,0.0), (0.0, -uvUnit), (uvUnit,-uvUnit)]
     #we assign each UV in sequence of the 'loop' for the whole mesh: 8 for an X
@@ -1087,13 +1419,16 @@ def createBMeshXBlockUVs(blockname, me, matrl, faceIndices):    #assume me is an
         face.image = xim
         faceTexId = bmfi[faceNo]
         #calculate the face location on the uvmap
-        mcTexU = faceTexId % 16
-        mcTexV = int(faceTexId / 16)  #int division.
+        mcTexU = getTextureAtlasU(faceTexId)
+        mcTexV = getTextureAtlasV(faceTexId)
         #multiply by square size to get U1,V1 (topleft):
-        u1 = (mcTexU * 16.0) / 256.0    # or >> 4 (div by imagesize to get as fraction)
-        v1 = (mcTexV * 16.0) / 256.0    # ..
+        u1 = (mcTexU * TEXTURE_ATLAS_PIXELS_PER_UNIT) / TEXTURE_ATLAS_PIXELS    # or >> 4 (div by imagesize to get as fraction)
+        v1 = (mcTexV * TEXTURE_ATLAS_PIXELS_PER_UNIT) / TEXTURE_ATLAS_PIXELS    # ..
         v1 = 1.0 - v1 #y goes low to high   #DEBUG print("That means u1,v1 is %f,%f" % (u1,v1))
 
+        #DEBUG
+        if DEBUG_BBUV:
+            print("createBMeshXBlockUVs %s u1,v1 %f,%f" % (blockname,u1,v1))
         loopPolyStart = pface.loop_start  #where its verts start in loop. :D
         #if loop total's not 4, need to work with ngons/tris or do more complex stuff.
         loopPolyCount = pface.loop_total
