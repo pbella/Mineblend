@@ -102,6 +102,7 @@ def getMCImg():
     else:
         img = None
         temppath = os.path.sep.join([MCPATH, TERRAIN_TEXTURE_ATLAS_NAME])
+        print("Mineblend loading terrain: "+temppath)
         
         if os.path.exists(temppath):
             img = bpy.data.images.load(temppath)
@@ -1082,7 +1083,7 @@ def setupCyclesMat(material, cyclesParams):
 
 def getMCMat(blocktype, rgbtriple, cyclesParams=None):  #take cycles params Dictionary - ['type': DIFF/EMIT/TRANSP, 'emitAmt': 0.0]
     """Creates or returns a general-use default Minecraft material."""
-    matname = blocktype + 'Mat'
+    matname = 'mc' + blocktype + 'Mat'
 
     if matname in bpy.data.materials:
         return bpy.data.materials[matname]
@@ -1113,6 +1114,15 @@ def getMCMat(blocktype, rgbtriple, cyclesParams=None):  #take cycles params Dict
 #                 Primary Block-Shape Creation Functions                      #
 ###############################################################################
 
+def createCubeMesh():
+    bpy.context.scene.cursor_location = (0.0, 0.0, 0.0)
+    bpy.ops.mesh.primitive_cube_add()
+    blockOb = bpy.context.object
+    bpy.ops.transform.resize(value=(0.5, 0.5, 0.5))
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    return blockOb
+
+
 def createInsetMCBlock(mcname, colourtriple, mcfaceindices, insets=[0,0,0], cyclesParams=None):
     """With no insets (the default), creates a full-size cube.
 Else uses [bottom,top,sides] to inset the cube size and UV coords.
@@ -1123,12 +1133,8 @@ Units are in Minecraft texels - so from 1 to 15. Inset 16 is an error."""
         return bpy.data.objects[blockname]
 
     pxlUnit = getUVUnit()
-    #Base cube
     bpy.ops.object.mode_set(mode='OBJECT')  #just to be sure... needed?
-    bpy.ops.mesh.primitive_cube_add()
-    blockOb = bpy.context.object    #ref to last created ob.
-    bpy.ops.transform.resize(value=(0.5, 0.5, 0.5)) #quarter size (to 1x1x1)
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    blockOb = createCubeMesh()
     blockOb.name = blockname
     mesh = blockOb.data
     meshname = blockname + 'Mesh'
@@ -1236,11 +1242,7 @@ def createMCBlock(mcname, colourtriple, mcfaceindices, cyclesParams=None):
     if blockname in bpy.data.objects:
         return bpy.data.objects[blockname]
 
-    #Create cube
-    bpy.ops.mesh.primitive_cube_add()
-    blockOb = bpy.context.object    #get ref to last created ob.
-    bpy.ops.transform.resize(value=(0.5, 0.5, 0.5))    #quarter size (to 1x1x1: it's currently 2x2x2 bu)
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    blockOb = createCubeMesh()
     blockOb.name = blockname
     blockMesh = blockOb.data
     meshname = blockname + 'Mesh'

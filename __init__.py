@@ -24,7 +24,7 @@ bl_info = {
     "name": "Import: Minecraft b1.7+",
     "description": "Importer for viewing Minecraft worlds",
     "author": "Adam Crossan (acro)",
-    "version": (1,6,2),
+    "version": (1,6,3),
     "blender": (2, 6, 0),
     "api": 41226,
     "location": "File > Import > Minecraft",
@@ -101,7 +101,7 @@ a preset specific folder structure of multiple files which cannot be selected si
     mcLoadAtCursor = bpy.props.BoolProperty(name='Use 3D Cursor as Player', description='Loads as if 3D cursor offset in viewport was the player (load) position.', default=False)
 
     #TODO: Make this much more intuitive for the user!
-    mcLowLimit = bpy.props.IntProperty(name='Load Floor', description='The lowest depth layer to load. (High=256, Sea=64, Low=0)', min=0, max=256, step=1, default=50, subtype='UNSIGNED')
+    mcLowLimit = bpy.props.IntProperty(name='Load Floor', description='The lowest depth layer to load. (High=256, Sea=64, Low=0)', min=0, max=256, step=1, default=60, subtype='UNSIGNED')
     mcHighLimit = bpy.props.IntProperty(name='Load Ceiling', description='The highest layer to load. (High=256, Sea=64, Low=0)', min=0, max=256, step=1, default=128, subtype='UNSIGNED')
 
     mcLoadRadius = bpy.props.IntProperty(name='Load Radius', description="""The half-width of the load range around load-pos.
@@ -116,6 +116,13 @@ WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, st
     mcShowSlimeSpawns = bpy.props.BoolProperty(name='Slime Spawns', description='Display green markers showing slime-spawn locations', default=False)
 
     mcUseCyclesMats = bpy.props.BoolProperty(name='Use Cycles', description='Set up default materials for use with Cycles Render Engine instead of Blender Internal', default=True)
+
+    mcFasterViewport = bpy.props.BoolProperty(name='Faster viewport', description='Disable display of common blocks (stone, dirt, etc.) in the viewport for better performance.  These block types will still be rendered.', default=True)
+
+    mcSurfaceOnly = bpy.props.BoolProperty(name='Surface only', description='Omit underground blocks.  Significantly better viewing and rendering performance.', default=False) # FIXME - not yet
+
+    # TODO
+    #mcGroupBlocks = bpy.props.BoolProperty(name='Group blocks', description='Omit underground blocks.  Significantly better viewing and rendering performance.', default=True)
 
     mcOmitMobs = bpy.props.BoolProperty(name='Omit Mobs', description='When checked, do not load mobs (creepers, skeletons, zombies, etc.) in world', default=True)
     #may need to define loadnether and loadend as operators...?
@@ -174,7 +181,8 @@ WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, st
         opts = {"omitstone": self.mcOmitStone, "showslimes": self.mcShowSlimeSpawns, "atcursor": self.mcLoadAtCursor,
             "highlimit": self.mcHighLimit, "lowlimit": self.mcLowLimit,
             "loadnether": mcLoadDimenNether, "loadend": mcLoadDimenEnd,
-            "usecycles": self.mcUseCyclesMats, "omitmobs": self.mcOmitMobs}
+            "usecycles": self.mcUseCyclesMats, "omitmobs": self.mcOmitMobs,
+            "fasterViewport": self.mcFasterViewport, "surfaceOnly": self.mcSurfaceOnly}
         #print(str(opts))
         #get selected world name instead via bpy.ops.mcraft.worldselected -- the enumeration as a property/operator...?
         mineregion.readMinecraftWorld(str(self.mcWorldSelectList), self.mcLoadRadius, opts)
@@ -185,7 +193,7 @@ WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, st
         #run minecraftLoadChunks
         if DEBUG_SCENE:
             createTestScene()
-        
+
         return {'FINISHED'}
 
 
@@ -219,6 +227,11 @@ WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, st
         row3 = col.row()
         row3.prop(self, "mcOmitStone")
         row3.prop(self, "mcOmitMobs")
+
+        row = col.row()
+        row.prop(self,"mcFasterViewport")
+        #row.prop(self,"mcSurfaceOnly")
+
         #if cycles:
         #like this from properties_data_mesh.py:
         ##layout = self.layout

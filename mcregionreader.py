@@ -1,3 +1,5 @@
+# FIXME - obsolete and likely no longer working as of 1.6.3... any reason to keep around?
+
 import os
 
 from struct import unpack   #, error as StructError

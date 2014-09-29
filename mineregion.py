@@ -36,6 +36,7 @@
 import bpy
 from bpy.props import FloatVectorProperty
 from mathutils import Vector
+import numpy as npy
 from . import blockbuild
 from . import sysutil
 #using blockbuild.createMCBlock(mcname, diffuseColour, mcfaceindices)
@@ -88,7 +89,7 @@ WORLD_ROOT = None
 
 #MCBINPATH -- in /bin, zipfile open minecraft.jar, and get terrain.png.
 #Feed directly into Blender, or save into the Blender temp dir, then import.
-print("Minecraft saved games location: "+sysutil.getMCPath())
+print("Mineblend saved games location: "+sysutil.getMCPath())
 
 #Blockdata: [name, diffuse RGB triple, texture ID list, extra data? (XD/none),
 # custom model shape (or None), shape params (or None if not custom mesh),
@@ -784,6 +785,7 @@ def readMinecraftWorld(worldFolder, loadRadius, toggleOptions):
         os.chdir("region")
 
     meshBuffer = {}
+    blockBuffer = {}
 
     #Initialise the world root - an empty to parent all land objects to.
     WORLD_ROOT = bpy.data.objects.new(worldSelected, None)	#,None => EMPTY!
@@ -834,11 +836,22 @@ def readMinecraftWorld(worldFolder, loadRadius, toggleOptions):
         from . import slimes
         slimeBuffer = []
 
+    # FIXME - need deltaX/Y/Z to get array index
+    zeroAdjX = -1 * (pZ-loadRadius)
+    zeroAdjZ = -1 * (pX-loadRadius)
+
     for z in range(pZ-loadRadius, pZ+loadRadius):
         for x in range(pX-loadRadius, pX+loadRadius):
 
             tChunk0 = datetime.datetime.now()
-            regionreader.readChunk(x,z, meshBuffer) #may need to be further broken down to block level. maybe rename as loadChunk.
+            if (OPTIONS['surfaceOnly']): # new method
+                numElements=(loadRadius*2+1)*16 # chunks * blocks
+                blockBuffer = npy.zeros((numElements,numElements,numElements))
+
+                # FIXME - currently only supported by anvil reader
+                regionreader.readChunk2(x,z, blockBuffer, zeroAdjX, zeroAdjZ)
+            else: # old
+                regionreader.readChunk(x,z, meshBuffer) #may need to be further broken down to block level. maybe rename as loadChunk.
             tChunk1 = datetime.datetime.now()
             chunkTime = tChunk1 - tChunk0
             tChunkReadTimes.append(chunkTime.total_seconds())	#tString = "%.2f seconds" % chunkTime.total_seconds() it's a float.
@@ -863,14 +876,15 @@ def readMinecraftWorld(worldFolder, loadRadius, toggleOptions):
         print(" ".join(["%d" % bn for bn in unknownBlockIDs]))
     
     #Viewport performance hides:
-    hideIfPresent('mcStone')
-    hideIfPresent('mcDirt')
-    hideIfPresent('mcSandstone')
-    hideIfPresent('mcIronOre')
-    hideIfPresent('mcGravel')
-    hideIfPresent('mcCoalOre')
-    hideIfPresent('mcBedrock')
-    hideIfPresent('mcRedstoneOre')
+    if (OPTIONS['fasterViewport']):
+        hideIfPresent('mcStone')
+        hideIfPresent('mcDirt')
+        hideIfPresent('mcSandstone')
+        hideIfPresent('mcIronOre')
+        hideIfPresent('mcGravel')
+        hideIfPresent('mcCoalOre')
+        hideIfPresent('mcBedrock')
+        hideIfPresent('mcRedstoneOre')
 
     #Profile/run stats:
     chunkReadTotal = tChunkReadTimes[0]

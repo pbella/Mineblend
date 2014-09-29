@@ -55,6 +55,9 @@ class AnvilChunkReader(mcregionreader.ChunkReader):
 
 
     
+    def readChunk2(self, chunkPosX, chunkPosZ, blockBuffer, zeroAdjX, zeroAdjY):
+        # FIXME - implement me!
+        return
 
     def readChunk(self, chunkPosX, chunkPosZ, vertexBuffer):  # aka "readChunkFromRegion" ...
         """Loads chunk located at the X,Z chunk location provided."""
