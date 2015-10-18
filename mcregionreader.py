@@ -4,6 +4,7 @@ import os
 
 from struct import unpack   #, error as StructError
 from . import nbtreader
+from mathutils import Vector
 from .mineregion import OPTIONS, EXCLUDED_BLOCKS, BLOCKDATA, REPORTING, unknownBlockIDs, getMCBlockType, mcToBlendCoord #yuck!
 ##..yuck: they're immutable and don't return properly except for the dict-type ones. Get rid of this in next cleanup.
 
@@ -266,7 +267,7 @@ class ChunkReader:
                     oneBlockAbove = blockID   # set 'last read block' to current value
 
 
-    def createBlock(blockID, chunkPos, blockPos, extraBlockData, vertBuffer):
+    def createBlockChunk(blockID, chunkPos, blockPos, extraBlockData, vertBuffer):
         """adds a vertex to the blockmesh for blockID in the relevant location."""
 
         #chunkpos is X,Z; blockpos is x,y,z for block.
@@ -276,6 +277,28 @@ class ChunkReader:
 
         typeName = mesh.name
         vertex = mcToBlendCoord(chunkPos, blockPos)
+
+        if typeName in vertBuffer:
+            vertBuffer[typeName].append(vertex)
+        else:
+            vertBuffer[typeName] = [vertex]
+
+        #xyz is local to the 'stone' mesh for example. but that's from 0 (world).
+        #regionfile can be found from chunkPos.
+        #Chunkpos is an X,Z pair.
+        #Blockpos is an X,Y,Z triple - within chunk.
+
+    def createBlock(blockID, blockPos, extraBlockData, vertBuffer):
+        """adds a vertex to the blockmesh for blockID in the relevant location."""
+
+        #chunkpos is X,Z; blockpos is x,y,z for block.
+        mesh = getMCBlockType(blockID, extraBlockData)  #this could be inefficient. Perhaps create all the types at the start, then STOP MAKING THIS CHECK!
+        if mesh is None:
+            return
+
+        typeName = mesh.name
+        #vertex = mcToBlendCoord(chunkPos, blockPos)
+        vertex = Vector((blockPos[2],blockPos[0],blockPos[1]))
 
         if typeName in vertBuffer:
             vertBuffer[typeName].append(vertex)

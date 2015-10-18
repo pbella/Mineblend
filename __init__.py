@@ -24,7 +24,7 @@ bl_info = {
     "name": "Import: Minecraft b1.7+",
     "description": "Importer for viewing Minecraft worlds",
     "author": "Adam Crossan (acro)",
-    "version": (1,6,3),
+    "version": (1,6,4),
     "blender": (2, 6, 0),
     "api": 41226,
     "location": "File > Import > Minecraft",
@@ -33,6 +33,7 @@ bl_info = {
     "category": "Import-Export"}
 
 DEBUG_SCENE=False
+DEVEL_OPTIONS=True
 
 # To support reload properly, try to access a package var, if it's there, reload everything
 if "bpy" in locals():
@@ -92,7 +93,7 @@ This supplants the need to call the file selector, since Minecraft worlds requir
 a preset specific folder structure of multiple files which cannot be selected singly."""
 
     bl_idname = "mcraft.selectworld"
-    bl_label = "Select Minecraft World"
+    bl_label = "Import Minecraft World"
     
     #bl_space_type = "PROPERTIES"
     #Possible placements for these:
@@ -107,9 +108,10 @@ a preset specific folder structure of multiple files which cannot be selected si
     mcLoadRadius = bpy.props.IntProperty(name='Load Radius', description="""The half-width of the load range around load-pos.
 e.g, 4 will load 9x9 chunks around the load centre
 WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, step=1, default=5, subtype='UNSIGNED')    #soft_min, soft_max?
+
     #optimiser algorithms/detail omissions
 
-    mcOmitStone = bpy.props.BoolProperty(name='Omit common blocks', description='When checked, do not import common blocks such as stone & dirt blocks (overworld) or netherrack (nether).  Significantly improves performance... good for preview imports.', default=False)
+    mcOmitStone = bpy.props.BoolProperty(name='Omit common blocks', description='When checked, do not import common blocks such as stone & dirt blocks (overworld) or netherrack (nether).  Significantly improves performance... good for test/preview imports.', default=False)
 
     mcDimenSelectList = bpy.props.EnumProperty(items=[('0', 'Overworld', 'Overworld'), ('1', 'Nether', 'Nether'), ('2', 'The End', 'The End')][::1], name="Dimension", description="Which dimension should be loaded?")	#default='0'
 
@@ -117,14 +119,23 @@ WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, st
 
     mcUseCyclesMats = bpy.props.BoolProperty(name='Use Cycles', description='Set up default materials for use with Cycles Render Engine instead of Blender Internal', default=True)
 
+    mcGenTextures = bpy.props.BoolProperty(name="Generate textures", description="Use Minecraft textures when generating.  Only available when 'Use Cycles' enabled.  Deselect for a simpler, more stylized look.", default=True)
+
     mcFasterViewport = bpy.props.BoolProperty(name='Faster viewport', description='Disable display of common blocks (stone, dirt, etc.) in the viewport for better performance.  These block types will still be rendered.', default=True)
 
-    mcSurfaceOnly = bpy.props.BoolProperty(name='Surface only', description='Omit underground blocks.  Significantly better viewing and rendering performance.', default=False) # FIXME - not yet
+    mcHideSides = bpy.props.BoolProperty(name='Omit sides/bottom', description='Omit the side and bottom layers of the world.  Useful to show underground features such as tunnels/structures and water/lava', default=True)
+
+    # FIXME - really should be called newVoxel as surface only will be another setting to determine whether to use a voxel (duplivert) vs. skin (mesh) approach
+    mcNewVoxel = bpy.props.BoolProperty(name='New voxel approach', description='Significantly better viewing and rendering performance at the cost of more RAM and longer to generate.  Will be needed for future generation options.', default=True) # FIXME - not yet
+
+    mcGenTexturesOnly = bpy.props.BoolProperty(name='Gen textures only', description='', default=False)
+
+    mcHollow = bpy.props.BoolProperty(name='Hollowing', description='Omit interior blocks.  Significantly smaller scenes resulting in better performance. You most likely REALLY want this enabled unless you know what you are doing.', default=True) # FIXME - not yet
 
     # TODO
     #mcGroupBlocks = bpy.props.BoolProperty(name='Group blocks', description='Omit underground blocks.  Significantly better viewing and rendering performance.', default=True)
 
-    mcOmitMobs = bpy.props.BoolProperty(name='Omit Mobs', description='When checked, do not load mobs (creepers, skeletons, zombies, etc.) in world', default=True)
+    mcOmitMobs = bpy.props.BoolProperty(name='Omit Mobs', description='When checked, do not create empties for mobs (creepers, skeletons, zombies, etc.) in world', default=True)
     #may need to define loadnether and loadend as operators...?
 
     # omit Dirt toggle option.
@@ -167,6 +178,12 @@ WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, st
 
     #my_worldlist = bpy.props.EnumProperty(items=[('0', "A", "The A'th item"), ('1', 'B', "Bth item"), ('2', 'C', "Cth item"), ('3', 'D', "dth item"), ('4', 'E', 'Eth item')][::-1], default='2', name="World", description="Which Minecraft save should be loaded?")
 
+    def updateCycles():
+        if mcCyclesMat:
+            print("enable genTextures")
+        else:
+            print("disable genTextures")
+
     def execute(self, context): 
         #self.report({"INFO"}, "Loading world: " + str(self.mcWorldSelectList))
         #thread.sleep(30)
@@ -181,11 +198,19 @@ WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, st
         opts = {"omitstone": self.mcOmitStone, "showslimes": self.mcShowSlimeSpawns, "atcursor": self.mcLoadAtCursor,
             "highlimit": self.mcHighLimit, "lowlimit": self.mcLowLimit,
             "loadnether": mcLoadDimenNether, "loadend": mcLoadDimenEnd,
-            "usecycles": self.mcUseCyclesMats, "omitmobs": self.mcOmitMobs,
-            "fasterViewport": self.mcFasterViewport, "surfaceOnly": self.mcSurfaceOnly}
+            "usecycles": self.mcUseCyclesMats, "genTextures": self.mcGenTextures,
+            "omitmobs": self.mcOmitMobs,
+            "fasterViewport": self.mcFasterViewport,
+            "newVoxel": self.mcNewVoxel, #"genTexturesOnly": self.mcGenTexturesOnly
+            "hollow": self.mcHollow,
+            "hideSides": self.mcHideSides}
         #print(str(opts))
         #get selected world name instead via bpy.ops.mcraft.worldselected -- the enumeration as a property/operator...?
-        mineregion.readMinecraftWorld(str(self.mcWorldSelectList), self.mcLoadRadius, opts)
+        if self.mcGenTexturesOnly:
+            #pass # TODO
+            mineregion.createMinecraftMaterialsOnly(opts)
+        else:
+            mineregion.readMinecraftWorld(self, str(self.mcWorldSelectList), self.mcLoadRadius, opts)
         for s in bpy.context.area.spaces: # iterate all space in the active area
             if s.type == "VIEW_3D": # check if space is a 3d-view
                 space = s
@@ -204,33 +229,73 @@ WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, st
 
     def draw(self, context):
         layout = self.layout
-        col = layout.column()
-        col.label(text="Choose import options")
 
-        row = col.row()
-        row.prop(self, "mcLoadAtCursor")
+        row = layout.row()
+        row.prop(self, "mcWorldSelectList")
+        #row.operator("mcraft.worldlist", icon='')
+        #col = layout.column()
+
+        row = layout.row()
+        row.prop(self, "mcDimenSelectList")
+        #col = layout.column()
+
+        split = layout.split()
+        col = split.column()
+        cont = col.column(align=True)
+        cont.label(text="Size")
+        cont.prop(self, "mcLowLimit")
+        cont.prop(self, "mcHighLimit")
+        cont.prop(self, "mcLoadRadius")
         
-        row = col.row()
-        
-        sub = col.split(percentage=0.5)
-        colL = sub.column(align=True)
-        colL.prop(self, "mcShowSlimeSpawns")
+        #split = layout.split()
+        #col = split.column()
+        row = layout.row()
+        cont = row.column(align=True)
+        #col = layout.column()
+        cont.label(text="General")
+        cont.prop(self, "mcLoadAtCursor")
+        cont.prop(self, "mcShowSlimeSpawns")
 
         cycles = None
         if hasattr(bpy.context.scene, 'cycles'):
             cycles = bpy.context.scene.cycles
-        row2 = col.row()
+        #row2 = col.row()
         if cycles is not None:
-            row2.active = (cycles is not None)
-            row2.prop(self, "mcUseCyclesMats")
+            #row2.active = (cycles is not None)
+            cont.prop(self, "mcUseCyclesMats")
+            cont.prop(self, "mcGenTextures")
 
-        row3 = col.row()
-        row3.prop(self, "mcOmitStone")
-        row3.prop(self, "mcOmitMobs")
+        #col = split.column()
+        cont = row.column(align=True)
+        cont.label(text="Omit / hide")
+        cont.prop(self,"mcFasterViewport")
+        cont.prop(self,"mcHollow")
+        cont.prop(self,"mcHideSides")
+        cont.prop(self, "mcOmitStone")
+        cont.prop(self, "mcOmitMobs")
 
         row = col.row()
-        row.prop(self,"mcFasterViewport")
-        #row.prop(self,"mcSurfaceOnly")
+        #container = row.box()
+        #box.operator("mcNewVoxel", "test")
+        #container.label(text="Voxel options")
+        #container.prop(self,"mcNewVoxel")
+        #container.prop(self,"mcHollow")
+        #container.prop(self,"mcHideSides")
+        #row = container.row()
+
+        if DEVEL_OPTIONS:
+            split = layout.split()
+            col = split.column()
+            cont = col.column(align=True)
+            cont.label(text="***DEVELOPMENT***")
+            cont.prop(self,"mcNewVoxel")
+            cont.prop(self,"mcGenTexturesOnly")
+        #row = col.row()
+        #row = col.row()
+
+        #TODO - need to enable/disable based on cycles setting
+        #mcUseCyclesMats = property(updateCycles)
+
 
         #if cycles:
         #like this from properties_data_mesh.py:
@@ -244,23 +309,21 @@ WARNING! Above 10, this gets slow and eats LOTS of memory!""", min=1, max=50, st
         ##sub.prop(mesh, "auto_smooth_angle", text="Angle")
         #row.operator(
         #row.prop(self, "mcLoadEnd")	#detect folder first (per world...)
-        
-        #label: "loading limits"
-        row = layout.row()
-        row.prop(self, "mcLowLimit")
-        row = layout.row()
-        row.prop(self, "mcHighLimit")
-        row = layout.row()
-        row.prop(self, "mcLoadRadius")
 
-        row = layout.row()
-        row.prop(self, "mcDimenSelectList")
-        #col = layout.column()
+        ##label: "loading limits"
+        #row = layout.row()
+        #row.prop(self, "mcLowLimit")
+        ##row = layout.row()
+        #row.prop(self, "mcHighLimit")
+        #row = layout.row()
+        #row.prop(self, "mcLoadRadius")
 
-        row = layout.row()
-        row.prop(self, "mcWorldSelectList")
-        #row.operator("mcraft.worldlist", icon='')
-        col = layout.column()
+        #row = layout.row()
+        #row.prop(self, "mcDimensionSettings")
+
+        #row = layout.row()
+        #row.prop(self,)
+
 
 def worldchange(self, context):
     ##UPDATE (ie read then write back the value of) the property in the panel

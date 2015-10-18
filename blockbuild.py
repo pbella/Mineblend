@@ -598,6 +598,7 @@ def createBMeshInsetUVs(blockname, me, matrl, faceIndices, insets):
 
 MC_SHADER_TEX="mcShaderTex"
 MC_SHADER_DIFFUSE="mcShaderDiffuse"
+MC_SHADER_DIFFUSE_RGB="mcShaderDiffuseRGB"
 MC_SHADER_STENCIL="mcShaderStencil"
 MC_SHADER_STENCIL_COLORED="mcShaderStencilColored"
 MC_GROUP_TEX_OUTPUT="Color"
@@ -652,6 +653,27 @@ def createNGmcDiffuse():
     ng.links.new(ngo.inputs[1],tex.outputs[1]) # For stained glass etc
 
     tex.location = Vector((0, 0))
+    diffuse.location = Vector((200, 200))
+    ngo.location = Vector((400, 0))
+
+def createNGmcDiffuseRGB():
+    """Node Group for diffuse materials"""
+    if DEBUG_SHADER:
+        print("createNGmcDiffuse")
+    ng = bpy.data.node_groups.new(MC_SHADER_DIFFUSE_RGB,"ShaderNodeTree")
+    ngi = ng.nodes.new(type=TYPE_NODE_GROUP_INPUT)
+    ngo = ng.nodes.new(type=TYPE_NODE_GROUP_OUTPUT)
+    #tex = ng.nodes.new(type=TYPE_NODE_GROUP)
+    #setNodeGroup(tex,MC_SHADER_TEX)
+    diffuse = ng.nodes.new(type="ShaderNodeBsdfDiffuse")
+
+    #ng.links.new(diffuse.inputs[0],tex.outputs[0]) # link the texCoord uv to the imageTex vector
+    ng.links.new(diffuse.inputs[0],ngi.outputs[0])
+    ng.links.new(ngo.inputs[0],diffuse.outputs[0])
+    #ng.links.new(ngo.inputs[1],tex.outputs[1]) # For stained glass etc
+
+    #tex.location = Vector((0, 0))
+    ngi.location = Vector((0, 0))
     diffuse.location = Vector((200, 200))
     ngo.location = Vector((400, 0))
 
@@ -810,6 +832,7 @@ def createNodeGroups():
     if existsNode==None:
         createNGmcTexture()
         createNGmcDiffuse()
+        createNGmcDiffuseRGB()
         createNGmcStencil()
         createNGmcStencilColored()
 
@@ -839,6 +862,35 @@ def createDiffuseCyclesMat(mat):
     removeExistingDiffuseNode(ntree)
     matOutNode = ntree.nodes['Material Output']
     ntree.links.new(input=mcdif.outputs[MC_GROUP_DIFFUSE_OUTPUT], output=matOutNode.inputs['Surface'])
+    mcdif.location = Vector((0,0))
+    matOutNode.location = Vector((200,0))
+
+def createDiffuseRGBCyclesMat(mat, cyclesParams):
+    """Create a basic textured, diffuse material that uses RGB color"""
+    if DEBUG_SHADER:
+        print("createDiffuseRGBCyclesMat")
+    #compatibility with Blender 2.5x:
+    if not hasattr(bpy.context.scene, 'cycles'):
+        print("No cycles support... skipping")
+        return
+
+    #Switch render engine to Cycles. Yippee ki-yay!
+    if bpy.context.scene.render.engine != 'CYCLES':
+        bpy.context.scene.render.engine = 'CYCLES'
+
+    mat.use_nodes = True
+
+    #maybe check number of nodes - there should be 2.
+    ntree = mat.node_tree
+    mcdif = ntree.nodes.new(type=TYPE_NODE_GROUP)
+    setNodeGroup(mcdif,MC_SHADER_DIFFUSE_RGB)
+    removeExistingDiffuseNode(ntree)
+    rgbNode = ntree.nodes.new(type="ShaderNodeRGB")
+    rgbNode.outputs[0].default_value = cyclesParams['diffuseRGB']
+    matOutNode = ntree.nodes['Material Output']
+    ntree.links.new(input=rgbNode.outputs['Color'],output=mcdif.inputs[0])
+    ntree.links.new(input=mcdif.outputs[MC_GROUP_DIFFUSE_OUTPUT], output=matOutNode.inputs['Surface'])
+    rgbNode.location = Vector((-200,0))
     mcdif.location = Vector((0,0))
     matOutNode.location = Vector((200,0))
 
@@ -930,10 +982,10 @@ def createStencilCyclesMat(mat):
     links.new(input=mixNode.outputs['Shader'], output=matNode.inputs['Surface'])
 
 
-def createLeafCyclesMat(mat):
+def createVegitationCyclesMat(mat):
     """Colored stencil materials such as leaves"""
     if DEBUG_SHADER:
-        print("createLeafCyclesMat")
+        print("createVegitationCyclesMat")
     """Very similar to the transparent (glass) material but different enough to need its own"""
     #Ensure Cycles is in use
     if bpy.context.scene.render.engine != 'CYCLES':
@@ -961,10 +1013,10 @@ def createLeafCyclesMat(mat):
     links.new(input=lightColorNode.outputs['Color'], output=stencilNode.inputs[1])
     links.new(input=stencilNode.outputs['Shader'], output=matNode.inputs['Surface'])
 
-def createLeafCyclesMatOld(mat):
+def createVegitationCyclesMatOld(mat):
     """Very similar to the transparent (glass) material but different enough to need its own"""
     if DEBUG_SHADER:
-        print("createLeafCyclesMat")
+        print("createVegitationCyclesMat")
     #Ensure Cycles is in use
     if bpy.context.scene.render.engine != 'CYCLES':
         bpy.context.scene.render.engine = 'CYCLES'
@@ -1002,12 +1054,12 @@ def createLeafCyclesMatOld(mat):
     links.new(input=rgbtobwNode.outputs['Val'], output=gtNode.inputs[1])
     links.new(input=gtNode.outputs['Value'], output=mixNode.inputs[FACTOR_INPUT])
 
-    # Leaf difference: feed the matl color into transparent... not needed? FIXME
+    # Vegitation difference: feed the matl color into transparent... not needed? FIXME
     links.new(input=transpNode.outputs[BSDF_OUTPUT], output=mixNode.inputs[2])
 
     links.new(input=mixNode.outputs['Shader'], output=matNode.inputs['Surface'])
 
-    # Leaf specific portion of material
+    # Vegitation specific portion of material
     lcrampNode = ntree.nodes.new(type="ShaderNodeValToRGB")
     lcrampNode.color_ramp.elements[1].color = (0.098, 0.238398, 0.135633, 1)
     lcrampNode.color_ramp.elements[0].color = (0.01, 0.0185002, 0.0137021, 1)
@@ -1056,30 +1108,33 @@ def setupCyclesMat(material, cyclesParams):
     if DEBUG_SHADER:
         print("setupCyclesMat")
     createNodeGroups()
-    if 'emit' in cyclesParams:
-        emitAmt = cyclesParams['emit']
-        if emitAmt > 0.0:
-            createEmissionCyclesMat(material, emitAmt)
-            return
+    genTextures = cyclesParams['genTextures']
+    if genTextures:
+        if 'emit' in cyclesParams:
+            emitAmt = cyclesParams['emit']
+            if emitAmt > 0.0:
+                createEmissionCyclesMat(material, emitAmt)
+                return
 
-    if 'stencil' in cyclesParams and cyclesParams['stencil']: #must be boolean true
-        if 'ovr' in cyclesParams:
-            #get the overlay colour, and create a transp overlay material.
+        if 'stencil' in cyclesParams and cyclesParams['stencil']: #must be boolean true
+            if 'ovr' in cyclesParams:
+                #get the overlay colour, and create a transp overlay material.
+                return
+            #not overlay
+            createStencilCyclesMat(material)
             return
-        #not overlay
-        createStencilCyclesMat(material)
-        return
     
-    if 'alpha' in cyclesParams and cyclesParams['alpha']:
-        createPlainAlphaCyclesMat(material)
-        return
+        if 'alpha' in cyclesParams and cyclesParams['alpha']:
+            createPlainAlphaCyclesMat(material)
+            return
 
-    if 'leaf' in cyclesParams and cyclesParams['leaf']:
-        createLeafCyclesMat(material)
-        return
+        if 'vegitation' in cyclesParams and cyclesParams['vegitation']:
+            createVegitationCyclesMat(material)
+            return
 
-    createDiffuseCyclesMat(material)
-
+        createDiffuseCyclesMat(material)
+    else:
+        createDiffuseRGBCyclesMat(material, cyclesParams)
 
 def getMCMat(blocktype, rgbtriple, cyclesParams=None):  #take cycles params Dictionary - ['type': DIFF/EMIT/TRANSP, 'emitAmt': 0.0]
     """Creates or returns a general-use default Minecraft material."""

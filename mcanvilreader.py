@@ -52,14 +52,9 @@ class AnvilChunkReader(mcregionreader.ChunkReader):
                 #NB: this can be made massively more efficient by storing 4 'neighbour chunk' data reads for every chunk properly processed.
                 #Don't need to do diagonals, even.
 
-
-
     
-    def readChunk2(self, chunkPosX, chunkPosZ, blockBuffer, zeroAdjX, zeroAdjY):
-        # FIXME - implement me!
-        return
-
-    def readChunk(self, chunkPosX, chunkPosZ, vertexBuffer):  # aka "readChunkFromRegion" ...
+    #def readChunk(self, chunkPosX, chunkPosZ, vertexBuffer, processFunc):  # aka "readChunkFromRegion" ...
+    def readChunk(self, chunkPosX, chunkPosZ, processFunc):  # aka "readChunkFromRegion" ...
         """Loads chunk located at the X,Z chunk location provided."""
 
         global REPORTING
@@ -99,10 +94,34 @@ class AnvilChunkReader(mcregionreader.ChunkReader):
                 #chunkXPos = chunkLvl['xPos'].value
                 #chunkZPos = chunkLvl['zPos'].value
                 #print("Reading blocks for chunk: (%d, %d)\n" % (chunkXPos, chunkZPos))
-                AnvilChunkReader._readBlocks(chunkLvl, vertexBuffer)
+                #AnvilChunkReader._readBlocks(chunkLvl, vertexBuffer)
+                processFunc(chunkLvl)
                 #print("Loaded chunk %d,%d" % (chunkPosX,chunkPosZ))
 
                 REPORTING['totalchunks'] += 1
+
+
+    def processChunk2(self, chunkPosX, chunkPosZ, blockBuffer, extraBuffer, zeroAdjX, zeroAdjZ):
+        # FIXME - implement me!
+        #print("reading chunk: "+str(chunkPosX)+","+str(chunkPosZ)+" offset: "+str(zeroAdjX)+", "+str(zeroAdjZ)+" array chunk index: "+str(chunkPosX+zeroAdjX)+", "+str(chunkPosZ+zeroAdjZ))
+        def _internalProcessChunk2(lvl): # handle chunk
+            def _internalProcessBlock2(block,extra,dX,dY,dZ): # handle blocks within a chunk
+                baseX = (chunkPosX+zeroAdjX)*16
+                #baseY = (chunkPosY+zeroAdjY)*16
+                baseZ = (chunkPosZ+zeroAdjZ)*16
+                blockBuffer[baseX+dX][dY][baseZ+dZ]=block
+                extraBuffer[baseX+dX][dY][baseZ+dZ]=extra
+                #pass
+            #pass
+            AnvilChunkReader._processBlocks(lvl, _internalProcessBlock2)
+
+        self.readChunk(chunkPosX, chunkPosZ, _internalProcessChunk2)
+
+    def processChunk(self, chunkPosX, chunkPosY, vertexBuffer):
+        def _internalProcessChunk(lvl):
+            AnvilChunkReader._readBlocks(lvl, vertexBuffer) # once _processBlocks above is done, migrate to this and eliminate _readBlocks
+
+        self.readChunk(chunkPosX, chunkPosY, _internalProcessChunk)
 
 
     def _readChunkData(bstream, chunkOffset, chunkSectorCount): #rename this!
@@ -249,6 +268,135 @@ class AnvilChunkReader(mcregionreader.ChunkReader):
         return False
 
 
+    def _processBlocks(chunkLevelData, processFunc):
+        """readBlocks(chunkLevelData) -> takes a named TAG_Compound 'Level' containing a chunk's Anvil Y-Sections, each of which 0-15 has blocks, data, heightmap, xpos,zpos, etc.
+    Adds the data points into a 'vertexBuffer' which is a per-named-type dictionary of ????'s. That later is made into Blender geometry via from_pydata."""
+        #TODO: also TileEntities and Entities. Entities will generally be an empty list.
+        #TileEntities are needed for some things to define fully...
+
+        #TODO: Keep an 'adjacent chunk cache' for neighbourhood is-exposed checks.
+        
+        global unknownBlockIDs, OPTIONS, REPORTING
+
+        #chunkLocation = 'xPos' 'zPos' ...
+        chunkX = chunkLevelData['xPos'].value
+        chunkZ = chunkLevelData['zPos'].value
+        biomes = chunkLevelData['Biomes'].value    #yields a TAG_Byte_Array value (bytes object) of len 256 (16x16)
+        #heightmap = chunkLevelData['HeightMap'].value
+        #'TileEntities' -- surely need this for piston data and stuff, no?
+        
+        entities = chunkLevelData['Entities'].value    # load ze sheeps!! # a list of tag-compounds.
+        #omitmobs = OPTIONS['omitmobs']
+        if not OPTIONS['omitmobs']:
+            AnvilChunkReader._loadEntities(entities)
+
+        skyHighLimit = OPTIONS['highlimit']
+        depthLimit   = OPTIONS['lowlimit']
+
+        CHUNKSIZE_X = 16
+        CHUNKSIZE_Z = 16
+        SECTNSIZE_Y = 16
+
+        ##_Y_SHIFT = 7    # 2**7 is 128. use for fast multiply
+        ##_YZ_SHIFT = 11    #16 * 128 is 2048, which is 2**11
+        sections = chunkLevelData['Sections'].value
+        
+        #each section is a 16x16x16 piece of chunk, with a Y-byte from 0-15, so that the 'y' value is 16*that + in-section-Y-value
+        
+        #iterate through all block Y values from bedrock to max height (minor step through X,Z.)
+        #bearing in mind some can be skipped out.
+        
+        #sectionDict => a dictionary of sections, indexed by Y.
+        sDict = {}
+        for section in sections:
+            sY = section.value['Y'].value
+            sDict[sY] = section.value
+        
+        for section in sections:
+            sec = section.value
+            secY = sec['Y'].value * SECTNSIZE_Y
+            
+            #if (secY + 16) < lowlimit, skip this section. no need to load it.
+            if (secY+16 < depthLimit):
+                continue
+            
+            if (secY > skyHighLimit):
+                return
+            
+            #Now actually proceed with adding in the section's block data.
+            blockData = sec['Blocks'].value    #yields a TAG_Byte_Array value (bytes object). Blocks is 16x16 bytes
+            extraData = sec['Data'].value      #BlockLight, Data and SkyLight are 16x16 "4-bit cell" additional data arrays.
+
+            #get starting Y from heightmap, ignoring excess height iterations...
+            #heightByte = heightMap[dX + (dZ << 4)]    # z * 16
+            #heightByte = 255    #quickFix: start from tip top, for now
+            #if heightByte > skyHighLimit:
+            #    heightByte = skyHighLimit
+
+            #go y 0 to 16...
+            for sy in range(16):
+                dY = secY + sy
+                
+                if dY < depthLimit:
+                    continue
+                if dY > skyHighLimit:
+                    return
+
+                # dataX will be dX, blender X will be bX.
+                for dZ in range(CHUNKSIZE_Z):
+                    #print("looping chunk z %d" % dZ)
+                    for dX in range(CHUNKSIZE_X):
+                        #oneBlockLeft = 0   #data value of the block 1 back to the left (-X) from where we are now. (for neighbour comparisons)
+                        #ie microcached 'last item read'. needs tweaked for chunk crossover...
+
+                        ##blockIndex = (dZ << _Y_SHIFT) + (dX << _YZ_SHIFT)  # max number of bytes in a chunk is 32768. this is coming in at 32839 for XYZ: (15,71,8)
+                        ##blockIndex = (dZ * 16) + dX
+                        #YZX ((y * 16 + z) * 16 + x
+                        blockIndex = (sy * 16 + dZ) * 16 + dX
+                        blockID = blockData[ blockIndex ]
+
+                        #except IndexError:
+                        #    print("X:%d Y:%d Z %d, blockID from before: %d, cx,cz: %d,%d. Blockindex: %d" % (dX,dY,dZ,blockID,chunkX,chunkZ, blockIndex))
+                        #    raise IndexError
+
+                        #create this block in the output!
+                        if blockID != 0 and blockID not in EXCLUDED_BLOCKS:    # 0 is air
+                            REPORTING['blocksread'] += 1
+
+                            #hollowness test:
+                            if blockID in BLOCKDATA:
+                                if AnvilChunkReader._isExposedBlock((dX,dY,dZ), (chunkX, chunkZ), blockData, sDict, blockID, skyHighLimit, depthLimit):
+                                    pass
+                                if True:
+                                    #print('xyz: '+str(dX)+","+str(dY)+", "+str(dZ)+" ",end="")
+                                    # BEGIN BLOCK PROCESSING
+                                    #TODO: Make better version of this check, counting across chunks and regions.
+                                    #Load extra data (if applicable to blockID):
+                                    #if it has extra data, grab 4 bits from extraData
+                                    datOffset = (int(blockIndex /2))    #divided by 2
+                                    datHiBits = blockIndex % 2 #odd or even, will be hi or low nibble
+                                    extraDatByte = extraData[datOffset] # should be a byte of which we only want part.
+                                    hiMask = 0b11110000
+                                    loMask = 0b00001111
+                                    extraValue = None
+                                    if datHiBits:
+                                        #get high 4, and shift right 4.
+                                        extraValue = loMask & (extraDatByte >> 4)
+                                    else:
+                                        #mask hi 4 off.
+                                        extraValue = extraDatByte & loMask
+                                #    #create block in corresponding blockmesh
+                                #    AnvilChunkReader.createBlockChunk(blockID, (chunkX, chunkZ), (dX,dY,dZ), extraValue, vertexBuffer)
+                                    processFunc(blockID,extraValue,dX,dY,dZ)
+                                #else:
+                                #    REPORTING['blocksdropped'] += 1
+                                # END BLOCK PROCESSING
+                            else:
+                                #print("Unrecognised Block ID: %d" % blockID)
+                                #createUnknownMeshBlock()
+                                unknownBlockIDs.add(blockID)
+                #print("")
+
     #nb: 0 is bottom bedrock, 256 (255?) is top of sky. Sea is 64.
     def _readBlocks(chunkLevelData, vertexBuffer):
         """readBlocks(chunkLevelData) -> takes a named TAG_Compound 'Level' containing a chunk's Anvil Y-Sections, each of which 0-15 has blocks, data, heightmap, xpos,zpos, etc.
@@ -364,7 +512,7 @@ class AnvilChunkReader(mcregionreader.ChunkReader):
                                         #mask hi 4 off.
                                         extraValue = extraDatByte & loMask
                                     #create block in corresponding blockmesh
-                                    AnvilChunkReader.createBlock(blockID, (chunkX, chunkZ), (dX,dY,dZ), extraValue, vertexBuffer)
+                                    AnvilChunkReader.createBlockChunk(blockID, (chunkX, chunkZ), (dX,dY,dZ), extraValue, vertexBuffer)
                                 else:
                                     REPORTING['blocksdropped'] += 1
                             else:
@@ -456,7 +604,7 @@ class AnvilChunkReader(mcregionreader.ChunkReader):
 #        return Vector((vx,vy,vz))
 
 
-#    def createBlock(blockID, chunkPos, blockPos, extraBlockData, vertBuffer):
+#    def createBlockChunk(blockID, chunkPos, blockPos, extraBlockData, vertBuffer):
 #        """adds a vertex to the blockmesh for blockID in the relevant location."""
 
         #chunkpos is X,Z; blockpos is x,y,z for block.

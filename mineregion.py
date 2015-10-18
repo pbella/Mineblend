@@ -100,6 +100,22 @@ print("Mineblend saved games location: "+sysutil.getMCPath())
 #Don't store a name for air. Ignore air.
 # Order for Blender cube face creation is: [bottom, top, right, front, left, back]
 
+# TODO - glass/stained glass
+BLOCKS_WATER = {8, 9,
+                -8, -9}
+BLOCKS_LAVA = {10, 11,
+               -10, -11}
+BLOCKS_OTHER = { # Basically all opaque building blocks that don't have special properties or that should be grouped seperately
+    1, 2, 3, 4, 7, 12, 13, 14, 15, 16, 17, 21, 22, 24, 35,
+    41, 42, 45, 48, 49, 56, 57, 60, 73, 74, 78, 80, 82, 87,
+    88, 89, 90, 110, 112, 120, 121, 129, 133, 152, 153, 155,
+    159, 162, 168, 170, 172, 173, 174, 179, 
+    -1, -2, -3, -4, -7, -12, -13, -14, -15, -16, -17, -21, -22, -24, -35,
+    -41, -42, -45, -48, -49, -56, -57, -60, -73, -74, -78, -80, -82, -87,
+    -88, -89, -90, -110, -112, -120, -121, -129, -133, -152, -153, -155,
+    -159, -162, -168, -170, -172, -173, -174, -179
+    }
+
 BLOCKDATA =  {0: ['Air'],
             1: ['Stone', (116,116,116), [308]*6],
             2: ['Grass', (95,159,53), [200,148,332,332,332,332]],
@@ -118,7 +134,7 @@ BLOCKDATA =  {0: ['Air'],
             15: ['IronOre', (216,175,147), [395]*6],
             16: ['CoalOre', (69,69,69), [161]*6],
             17: ['Wood', (76,61,38), [452,452,451,451,451,451], 'XD'],
-            18: ['Leaves', (99,128,15), [425]*6, None, None, None, {'stencil': False, 'leaf': True}],    #TODO: XD colour+texture.
+            18: ['Leaves', (99,128,15), [425]*6, None, None, None, {'stencil': False, 'vegitation': True}],    #TODO: XD colour+texture.
             19: ['Sponge', (206,206,70), [244]*6], # FIXME - wet sponge
             20: ['Glass', (254,254,254), [263]*6, None, None, None, {'stencil': True}],
             21: ['LapisLazuliOre', (28,87,198), [418]*6],
@@ -132,8 +148,8 @@ BLOCKDATA =  {0: ['Air'],
             29: ['StickyPiston', (114,120,70), [109,491,493,493,493,493], 'XD', 'pstn'],
             30: ['Cobweb', (237,237,237), [54]*6, 'none', 'cross', None, {'stencil': True}],
             # tried 370, 434
-            31: ['TallGrass', (52,79,45), [213,213,213,213,213,213], 'XD', 'cross', None, {'stencil': True}],
-            32: ['DeadBush', (148,100,40), [225]*6, None, 'cross', None, {'stencil': True}],
+            31: ['TallGrass', (52,79,45), [213,213,213,213,213,213], 'XD', 'cross', None, {'stencil': True, 'vegitation': True}],
+            32: ['DeadBush', (148,100,40), [225]*6, None, 'cross', None, {'stencil': True, 'vegitation': True}],
             33: ['Piston', (114,120,70), [491,494,493,493,493,493], 'XD', 'pstn'],
             34: ['PistonHead', (188,152,98), [494]*6],	#or top is 106 if sticky (extra data)
             35: ['Wool', (235,235,235), [279]*6, 'XD'],  #XD means use xtra data...
@@ -528,11 +544,19 @@ This also ensures material and name are set."""
             cycParams = bdat[6]
         if cycParams is None:
             cycParams = {'emit': 0.0, 'stencil': False}
+        if OPTIONS['genTextures']:
+            cycParams['genTextures']=True
+        else:
+            cycParams['genTextures']=False
+            cycParams['diffuseRGB']=[colourtriple[0]/255, colourtriple[1]/255, colourtriple[2]/255, 1]
     
     nameVariant = ''
     if blockID in BLOCKVARIANTS:
         variants = BLOCKVARIANTS[blockID]
         if extraBits is not None and extraBits >= 0 and extraBits < len(variants):
+            # FIXME - why?
+            #print(str(extraBits))
+            extraBits = int(extraBits)
             variantData = variants[extraBits]
             if len(variantData) > 0:
                 nameVariant = variantData[0]
@@ -680,8 +704,29 @@ def hasEnd(worldFolder):
             #and: contains correct files? also check regions aren't empty.
     return False
 
+def createMinecraftMaterialsOnly(toggleOptions):
+    global OPTIONS, REPORTING
+    OPTIONS = toggleOptions
+    xOffset = 0
+    yOffset = 0
+    offsetDelta = 1
+    for curBlock in BLOCKDATA:
+        bl = getMCBlockType(curBlock,None)
+        #bl.transform() # TODO - transform by offset
+    shouldLayout=True
+    if shouldLayout:
+        for curObj in bpy.data.objects:
+            if (curObj.type=='MESH'): # TODO - also check suffix? (*Block)
+                curObj.location = Vector((xOffset, yOffset, 0))
+                print(curObj.type)
+                #curObj.translate(value=(xOffset, yOffset, 0))
+                xOffset += offsetDelta
+                if (xOffset>12):
+                    xOffset=0
+                    yOffset += offsetDelta
 
-def readMinecraftWorld(worldFolder, loadRadius, toggleOptions):
+
+def readMinecraftWorld(self, worldFolder, loadRadius, toggleOptions):
     global unknownBlockIDs, wseed
     global EXCLUDED_BLOCKS
     global WORLD_ROOT
@@ -837,21 +882,38 @@ def readMinecraftWorld(worldFolder, loadRadius, toggleOptions):
         slimeBuffer = []
 
     # FIXME - need deltaX/Y/Z to get array index
-    zeroAdjX = -1 * (pZ-loadRadius)
-    zeroAdjZ = -1 * (pX-loadRadius)
+    zeroAdjX = -1 * (pX-loadRadius)
+    zeroAdjZ = -1 * (pZ-loadRadius)
+    #zeroAdjY = -1 * OPTIONS['lowlimit']
+    #sizeY = OPTIONS['highlimit']-OPTIONS['lowlimit']+1
+    sizeY = 256
 
-    for z in range(pZ-loadRadius, pZ+loadRadius):
-        for x in range(pX-loadRadius, pX+loadRadius):
+    # for newVoxel and other approaches that process the entire world section as a whole
+    numElements=(loadRadius*2+1)*16 # chunks * blocks
+    #numElements=(loadRadius*2)*16 # chunks * blocks
+    #print("block buffer size: "+str(numElements)+", "+str(sizeY)+", "+str(numElements))
+    print("block buffer size: "+str(numElements)+", "+str(sizeY)+", "+str(numElements))
+    blockBuffer = npy.zeros((numElements,sizeY,numElements))
+    extraBuffer = npy.zeros((numElements,sizeY,numElements))
+
+    wm = bpy.context.window_manager
+    wm.progress_begin(0,99)
+    progCounter = 0
+    progMax = (pZ+loadRadius+1)-(pZ-loadRadius)
+    for z in range(pZ-loadRadius, pZ+loadRadius+1):
+        wm.progress_update(((progCounter/progMax)/2)*100)
+        progCounter+=1
+        for x in range(pX-loadRadius, pX+loadRadius+1):
 
             tChunk0 = datetime.datetime.now()
-            if (OPTIONS['surfaceOnly']): # new method
-                numElements=(loadRadius*2+1)*16 # chunks * blocks
-                blockBuffer = npy.zeros((numElements,numElements,numElements))
+            #print('processing '+str(x)+', '+str(z))
+            if (OPTIONS['newVoxel']): # new method
 
                 # FIXME - currently only supported by anvil reader
-                regionreader.readChunk2(x,z, blockBuffer, zeroAdjX, zeroAdjZ)
+                #regionreader.processChunk2(x,z, blockBuffer, zeroAdjX, zeroAdjY, zeroAdjZ)
+                regionreader.processChunk2(x,z, blockBuffer, extraBuffer, zeroAdjX, zeroAdjZ)
             else: # old
-                regionreader.readChunk(x,z, meshBuffer) #may need to be further broken down to block level. maybe rename as loadChunk.
+                regionreader.processChunk(x,z, meshBuffer) #may need to be further broken down to block level. maybe rename as loadChunk.
             tChunk1 = datetime.datetime.now()
             chunkTime = tChunk1 - tChunk0
             tChunkReadTimes.append(chunkTime.total_seconds())	#tString = "%.2f seconds" % chunkTime.total_seconds() it's a float.
@@ -861,7 +923,56 @@ def readMinecraftWorld(worldFolder, loadRadius, toggleOptions):
                     slimeLoc = mcToBlendCoord((x,z), (8,8,8))	#(8,8,120)
                     slimeLoc += Vector((0.5,0.5,-0.5))
                     slimeBuffer.append(slimeLoc)
+    shouldHollow = OPTIONS['hollow']
+    if (OPTIONS['newVoxel']): # new method for voxel-based
+        yMax = OPTIONS['highlimit']
+        yMin = OPTIONS['lowlimit']
+        xMin = 0
+        xMax = numElements-1
+        zMin = 0
+        zMax = numElements-1
+        hideSides = OPTIONS['hideSides']
+        print('mMin/Max: '+str(xMin)+'-'+str(xMax)+', yMin/Max: '+str(yMin)+'-'+str(yMax)+', zMin/Max: '+str(zMin)+'-'+str(zMax))
+        if hideSides:
+            print("hiding sides")
+        progMax = (zMax+1)-zMin
+        progCounter = 0
+        for z in range(zMin, zMax+1):
+            wm.progress_update((49+(progCounter/progMax)/2)*100)
+            progCounter += 1
 
+            for y in range(yMin, yMax+1): # FIXME - 0,255? (i.e. yMin/Max for visibility only?)
+                for x in range(xMin, xMax+1):
+                    blockID = blockBuffer[x][y][z]
+                    skipBlock = False
+                    #if ((x>0) & (y>yMin) & (z>0) & (x<numElements) & (y<yMax) & (z<numElements)):
+                    if shouldHollow:
+                        if ((x>xMin) & (y>yMin) & (z>zMin) & (x<xMax) & (y<yMax) & (z<zMax)):
+                            if (blockID in BLOCKS_WATER):
+                                #print("is water")
+                                if blockSurroundedBy(blockBuffer,BLOCKS_WATER,x,y,z):
+                                    #print("hollowing")
+                                    blockBuffer[x][y][z]=-1*blockID
+                                    REPORTING['blocksdropped'] += 1
+                                    skipBlock=True
+                            elif (blockID in BLOCKS_LAVA):
+                                if blockSurroundedBy(blockBuffer,BLOCKS_LAVA,x,y,z):
+                                    blockBuffer[x][y][z]=-1*blockID
+                                    REPORTING['blocksdropped'] += 1
+                                    skipBlock=True
+                            elif (blockID in BLOCKS_OTHER):
+                                if blockSurroundedBy(blockBuffer,BLOCKS_OTHER,x,y,z):
+                                    blockBuffer[x][y][z]=-1*blockID
+                                    REPORTING['blocksdropped'] += 1
+                                    skipBlock=True
+                    if (hideSides):
+                        if ((x==xMin) | (x==xMax) | (y==yMin) | (y==yMax) | (z==zMin) | (z==zMax)):
+                            skipBlock=True
+                    if ((not skipBlock) & (blockID>0)):
+                        extraValue = extraBuffer[x][y][z] # TODO (see _readBlocks in mcanvilreader)
+                        AnvilChunkReader.createBlock(blockID, (x,y,z), extraValue, meshBuffer)
+
+    wm.progress_end()
     tBuild0 = datetime.datetime.now()
     batchBuild(meshBuffer)
     if (OPTIONS['showslimes']):
@@ -902,6 +1013,25 @@ def readMinecraftWorld(worldFolder, loadRadius, toggleOptions):
     #increase viewport clip dist to see the world! (or decrease mesh sizes)
     #bpy.types.Space...
     #Actually: scale world root down to 0.05 by default?
+
+def blockSurroundedBy(blockAry,blockGroupAry,x,y,z):
+    #id = blockAry[x][y][z]
+    #if (id in blockGroupAry):
+    #print("xyz: "+str(x)+", "+str(y)+", "+str(z))
+    bl_u = blockAry[x][y][z+1]
+    if (bl_u in blockGroupAry):
+        bl_d = blockAry[x][y][z-1]
+        if (bl_d in blockGroupAry):
+            bl_l = blockAry[x-1][y][z]
+            if (bl_l in blockGroupAry):
+                bl_r = blockAry[x+1][y][z]
+                if (bl_r in blockGroupAry):
+                    bl_f = blockAry[x][y-1][z]
+                    if (bl_f in blockGroupAry):
+                        bl_b = blockAry[x][y+1][z]
+                        if (bl_b in blockGroupAry):
+                            return True
+    return False
 
 def hideIfPresent(mName):
     if mName in bpy.data.objects:
